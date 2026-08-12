@@ -1,0 +1,132 @@
+import { describe, it, expect, beforeEach, vi } from "vitest";
+import { drizzle } from "drizzle-orm/pg-proxy";
+
+import * as schema from "~/db/schema";
+
+/**
+ * `ensureMember` against the real read path.
+ *
+ * The tombstone case was only ever tested by handing `assertModerator` a
+ * hand-built record, which cannot show you what the read path actually
+ * produces — and what it produced was a throw. A soft-deleted row is invisible
+ * to the deletedAt-filtered read, so ensureMember inserted, hit the user_id
+ * unique index, re-read, saw nothing, and threw: every request that account
+ * made 500'd forever, and the soft delete AGENTS.md mandates was unusable.
+ */
+
+const seen: string[] = [];
+let filteredSelect: unknown[][] = [];
+let unfilteredSelect: unknown[][] = [];
+let insertResult: unknown[][] = [];
+
+vi.mock("~/db", async () => {
+  const db = drizzle(
+    async (sql: string) => {
+      seen.push(sql);
+      const lowered = sql.toLowerCase();
+      if (lowered.startsWith("insert")) return { rows: insertResult };
+      if (lowered.includes("deleted_at" + '" is null'))
+        return { rows: filteredSelect };
+      return { rows: unfilteredSelect };
+    },
+    { schema },
+  );
+  return { db, getDb: () => db, schema };
+});
+
+const { ensureMember, findAnyMemberByUserId } =
+  await import("~/db/queries/members");
+const { assertModerator } = await import("~/lib/require-role.server");
+const { isSuspended } = await import("~/lib/membership.server");
+
+const NOW = new Date("2026-08-12T00:00:00Z");
+
+/** Positional row in MEMBER_COLUMNS order. */
+function row(
+  overrides: {
+    moderator?: boolean;
+    suspended?: Date | null;
+    deleted?: Date | null;
+  } = {},
+) {
+  return [
+    "m1",
+    "u1",
+    "quiet-ibex",
+    overrides.moderator ?? true,
+    overrides.suspended ?? null,
+    null,
+    overrides.deleted ?? null,
+    NOW,
+  ];
+}
+
+beforeEach(() => {
+  seen.length = 0;
+  filteredSelect = [];
+  unfilteredSelect = [];
+  insertResult = [];
+});
+
+describe("ensureMember", () => {
+  it("returns a live row without inserting", async () => {
+    filteredSelect = [row()];
+    const member = await ensureMember("u1");
+
+    expect(member.id).toBe("m1");
+    expect(seen.some((sql) => sql.toLowerCase().startsWith("insert"))).toBe(
+      false,
+    );
+  });
+
+  it("inserts on first sight", async () => {
+    insertResult = [row()];
+    const member = await ensureMember("u1");
+
+    expect(member.id).toBe("m1");
+    expect(seen.some((sql) => sql.toLowerCase().startsWith("insert"))).toBe(
+      true,
+    );
+  });
+
+  it("returns the tombstone instead of throwing, so the guards can reject it", async () => {
+    // The filtered read cannot see a tombstone, and the insert loses to the
+    // user_id unique index. This is the exact sequence that used to 500.
+    filteredSelect = [];
+    insertResult = [];
+    unfilteredSelect = [row({ deleted: NOW })];
+
+    const member = await ensureMember("u1");
+    expect(member.deletedAt).toEqual(NOW);
+
+    // And the guards do reject it, which is what makes the soft delete work.
+    expect(isSuspended(member)).toBe(true);
+    expect(() => assertModerator(member)).toThrowError(/not a moderator/i);
+  });
+
+  it("still throws when there is genuinely no row, rather than inventing one", async () => {
+    filteredSelect = [];
+    insertResult = [];
+    unfilteredSelect = [];
+    await expect(ensureMember("u1")).rejects.toThrow(/no row for user/);
+  });
+
+  it("reads the tombstone with an unfiltered query, since a filtered one cannot see it", async () => {
+    unfilteredSelect = [row({ deleted: NOW })];
+    const found = await findAnyMemberByUserId("u1");
+
+    expect(found?.deletedAt).toEqual(NOW);
+    expect(seen[0].toLowerCase()).not.toContain("deleted_at" + '" is null');
+  });
+});
+
+describe("a suspended moderator read from the database", () => {
+  it("is refused, which a hand-built record could never have proven", async () => {
+    filteredSelect = [row({ moderator: true, suspended: NOW })];
+    const member = await ensureMember("u1");
+
+    expect(member.isModerator).toBe(true);
+    expect(member.suspendedAt).toEqual(NOW);
+    expect(() => assertModerator(member)).toThrowError(/not a moderator/i);
+  });
+});

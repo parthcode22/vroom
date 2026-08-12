@@ -1,0 +1,84 @@
+# AGENTS.md
+
+Local rules for this repo. These override generic guidance.
+
+## Project
+
+V Rooms — a pseudonymous, real-time campus conversation for verified VIT students.
+Built by VOSS Labs. Read `.preset/PRODUCT.md` before proposing any feature; the
+out-of-scope list there is deliberate and is not a backlog to quietly work through.
+
+## Process
+
+This repo is run through the preset MCP server on the `ai-native-team` archetype.
+
+- `.preset/state.json` holds only `project_id` and `repo_key`. The live phase comes
+  from `preset.get_state`, never from a file.
+- Process artifacts live in `.preset/`. Product source code lives in the repo proper.
+- Do not skip a phase and do not hand-write an artifact to unlock the next one.
+- Read `preset.get_decisions` before designing or reviewing.
+
+## Decision records
+
+This project uses XIPs (see `/vrips/`) for non-trivial decisions. Before working in
+an area covered by an XIP, read it. When proposing a significant change, draft a new
+XIP first rather than changing the code and explaining afterwards.
+
+## Stack
+
+Decided in VRIP-03. Do not substitute parts of it without a superseding XIP.
+
+- One Cloudflare Worker serves everything. React Router v8 in framework mode
+  renders both the room and the moderator console, and the Durable Object class is
+  exported from the same Worker entry (VRIP-06, superseding VRIP-03's Pages line)
+- Styling: Tailwind + shadcn, mobile-first, matching voss-auth's components.json
+- Realtime: one Durable Object per room on the WebSocket Hibernation API
+- Message history: Durable Object SQLite storage
+- Users, reports, moderation audit: Neon Postgres via `@neondatabase/serverless`
+- Auth: V Auth OIDC, exchanged for a short-lived app JWT
+- No Redis. See VRIP-03 for why.
+
+## Hard constraints
+
+- Durable Object classes must use a `new_sqlite_classes` migration. Key-value backed
+  classes do not work on the Workers free plan.
+- Under WebSocket Hibernation the object is evicted from memory. Persist connection
+  state with `serializeAttachment()` / `deserializeAttachment()` and restore via
+  `ctx.getWebSockets()`. Getting this wrong makes sockets appear to die after
+  seconds and is the single most likely source of a confusing bug here.
+- Use Neon's serverless HTTP driver, not a TCP `pg` client. Workers cannot hold TCP
+  Postgres connections.
+- Validate the V Auth JWT on the WebSocket upgrade request, before the upgrade is
+  accepted. Auth checks come before any business logic.
+- Never log, echo, or commit the V Auth account to pseudonym mapping outside the
+  users table. It is the most sensitive data in the system.
+- Report, block, suspend, and the kill switch ship in v1. They are not features to
+  defer to a later phase.
+- The kill switch is Durable Object state, never an environment variable. An env var
+  needs a redeploy and is useless as an emergency control (VRIP-05).
+- The app token goes in the WebSocket subprotocol, never the query string. A query
+  string writes a bearer credential into every access log it passes (VRIP-07).
+- Revealing an identity must be bound to a report. The database enforces it: a
+  moderation_audit row with action 'reveal' and a null report_id violates a CHECK
+  constraint (VRIP-04, VRIP-05).
+- Every moderator action re-checks the role on the server. Hiding the navigation
+  entry is presentation, not access control.
+- Rate limiting is keyed per pseudonym, not per socket. Two tabs must not double
+  anyone's budget.
+
+## Conventions
+
+- Files 200-400 lines maximum. Split when bigger.
+- Explicit error handling in every public function.
+- Every user-facing flow has loading, error, and empty states. The empty state of
+  Campus Live matters more here than in most products.
+- Mobile-first. Layout starts at 320px. Touch targets at least 44x44 CSS pixels.
+- Tests cover the happy path and the error paths.
+- No emojis anywhere: code, comments, docs, commits, READMEs.
+- No `Co-Authored-By` lines in commits.
+
+## Contributing
+
+Feature requests from students arrive as GitHub issues and are built by student
+contributors. That is the intended path, not an exception to it. Point newcomers at
+`voss-labs/first-contributions` first.

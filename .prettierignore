@@ -1,0 +1,7 @@
+build/
+.react-router/
+.wrangler/
+node_modules/
+worker-configuration.d.ts
+prototype.html
+package-lock.json

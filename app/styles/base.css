@@ -1,0 +1,260 @@
+/**
+ * Tokens, the base layer, and the two component families that belong to neither
+ * the room nor the console: the primitives and the app frame.
+ */
+
+@theme {
+  /* neutrals: vask's stone greys on a near-black terminal ground */
+  --color-ground: #0b0b0a;
+  --color-panel: #111110;
+  --color-panel-2: #161514;
+  --color-raised: #1d1b19;
+  --color-raised-2: #262320;
+  --color-line: #211f1e;
+  --color-line-2: #302e2b;
+  --color-line-3: #4a4744;
+
+  --color-ink: #fafafa;
+  --color-ink-2: #a8a29e;
+  --color-ink-3: #737373;
+
+  /* VOSS brand orange. Reserved for your action / fresh / focused. Never "bad". */
+  --color-brand: #fb7a3c;
+  --color-brand-deep: #c4421d;
+
+  /* state, deliberately outside the brand so nothing double-encodes */
+  --color-neg: #9f4848;
+  --color-ok: #5cb88a;
+
+  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono:
+    ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+}
+
+:root {
+  --brand-dim: rgba(251, 122, 60, 0.13);
+  --neg-dim: rgba(159, 72, 72, 0.13);
+  /* One radius. Every surface and control shares it, so nothing looks
+     borrowed from a different design. Only status dots stay circular. */
+  --radius: 4px;
+  --radius-sm: 4px;
+  --radius-item: 4px;
+  --r-card: 4px;
+  --r-ctl: 4px;
+  color-scheme: dark;
+}
+
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+
+  body {
+    margin: 0;
+    background: var(--color-ground);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-size: 14px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #2a2826;
+    border: 3px solid transparent;
+    background-clip: padding-box;
+    border-radius: 4px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #3f3b38;
+    background-clip: padding-box;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-brand);
+    outline-offset: 2px;
+  }
+}
+
+@layer components {
+  /* ---------- primitives ---------- */
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    height: 32px;
+    padding: 0 13px;
+    font-family: var(--font-sans);
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--color-ink);
+    background: var(--color-panel-2);
+    border: 1px solid var(--color-line-2);
+    border-radius: var(--radius);
+    cursor: pointer;
+    white-space: nowrap;
+    transition:
+      background 110ms ease,
+      border-color 110ms ease;
+  }
+  .btn:hover:not(:disabled) {
+    background: var(--color-raised);
+    border-color: var(--color-line-3);
+  }
+  .btn-primary {
+    background: var(--color-brand);
+    border-color: var(--color-brand);
+    color: #1a0d05;
+    font-weight: 600;
+  }
+  .btn-primary:hover:not(:disabled) {
+    background: #ff8d55;
+    border-color: #ff8d55;
+  }
+  .btn-danger {
+    color: var(--color-neg);
+    border-color: rgba(159, 72, 72, 0.35);
+  }
+  .btn-danger:hover:not(:disabled) {
+    background: var(--neg-dim);
+    border-color: var(--color-neg);
+  }
+  .btn-sm {
+    height: 26px;
+    padding: 0 9px;
+    font-size: 12px;
+  }
+  .btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  .tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 8px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    background: var(--color-panel-2);
+    border: 1px solid var(--color-line-2);
+    border-radius: var(--radius-sm);
+    color: var(--color-ink-2);
+    white-space: nowrap;
+  }
+  .tag-live {
+    color: var(--color-ok);
+    border-color: rgba(92, 184, 138, 0.3);
+  }
+  .tag-dead {
+    color: var(--color-neg);
+    border-color: rgba(159, 72, 72, 0.35);
+  }
+
+  .mark {
+    width: 6px;
+    height: 6px;
+    flex: 0 0 auto;
+    background: var(--color-ok);
+  }
+  .mark-dead {
+    background: var(--color-neg);
+  }
+
+  /* ---------- frame ---------- */
+
+  .app {
+    display: flex;
+    flex-direction: column;
+    height: 100dvh;
+    min-height: 480px;
+  }
+
+  .topbar {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+    padding: 0 16px;
+    height: 48px;
+    flex: 0 0 auto;
+    background: var(--color-panel);
+    border-bottom: 1px solid var(--color-line-2);
+  }
+  .wordmark {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    font-family: var(--font-mono);
+    font-size: 14px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+  }
+  .wordmark i {
+    width: 3px;
+    height: 14px;
+    background: var(--color-brand);
+    display: block;
+  }
+  .wordmark small {
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--color-ink-3);
+  }
+
+  .tabs {
+    display: flex;
+    gap: 2px;
+  }
+  .tab {
+    display: inline-flex;
+    align-items: center;
+    padding: 5px 12px;
+    min-height: 32px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--color-ink-3);
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    text-decoration: none;
+  }
+  .tab:hover {
+    color: var(--color-ink-2);
+  }
+  .tab[aria-current="page"] {
+    background: var(--color-raised);
+    border-color: var(--color-line-2);
+    color: var(--color-ink);
+  }
+
+  .sr {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+}
+
+@media (max-width: 720px) {
+  .wordmark small {
+    display: none;
+  }
+}

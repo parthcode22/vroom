@@ -1,36 +1,98 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# V Rooms
 
-## Getting Started
+A pseudonymous, real-time conversation for verified VIT students. Built by VOSS Labs.
 
-First, run the development server:
+WhatsApp connects people who already know each other. V Rooms lets you talk to the
+college you have not met yet. You log in with V Auth, you get a handle, and you are
+already in the room. No joining, no invite, no knowing anyone first. Other students
+see only your handle, never your name, your email, or your division.
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+Status: v1 in progress. Product scope is in `.preset/PRODUCT.md`, decisions are in
+`/vrips/`, and the approved interface is `prototype.html`.
+
+## Quick start
+
+Prerequisites: Node 20+, a Cloudflare account (the free plan is enough), a Neon
+project, and a V Auth client registered in `voss-auth`.
+
+```
+git clone <repo>
+cd v-rooms
+npm install
+cp .env.example .env           # fill in the values
+cp .env .dev.vars              # wrangler reads secrets from here in dev
+npm run db:push                # drizzle-kit carries the schema
+npm run db:migrate             # numbered SQL carries the CHECKs and triggers
+npm run dev                    # app, worker and durable object together
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Checks:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```
+npm run typecheck              # wrangler types + react-router typegen + tsc
+npm test                       # unit tests on Node, worker tests in workerd
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Deploy:
 
-## Learn More
+```
+npm run deploy                 # build then wrangler deploy, one Worker
+```
 
-To learn more about Next.js, take a look at the following resources:
+Never run bare `wrangler deploy`: the Vite plugin bakes `wrangler.jsonc` into
+`build/server/`, so deploying without building first ships the previous config
+with no warning.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## How it works
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+```
+browser ──► V Auth (OIDC) ──► app token (handle + room only)
+   │
+   └── WebSocket ──► Worker (validates the token on the upgrade, before accept)
+                        │
+                        └──► Room Durable Object (holds the sockets, broadcasts,
+                             stores messages in its own SQLite)
+                        │
+                        └──► Neon (accounts, members, reports, moderation audit)
+```
 
-## Deploy on Vercel
+One Durable Object per room means the object itself is the fanout point, so there
+is no Redis and no pub/sub layer. Message history lives inside the object next to
+the code that serves it. Anything that needs querying across rooms — accounts,
+reports, the audit trail — lives in Neon.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+The token handed to the browser carries a handle and a room, and nothing else. The
+Worker and the Durable Object never receive an email or a V Auth account id, so the
+realtime layer cannot leak an identity it was never given.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+See `.preset/ARCHITECTURE.md` for the full design and `/vrips/` for the reasoning
+behind each part of the stack.
+
+## Moderation
+
+Anonymity in V Rooms exists between students, not between a student and the
+platform. Every message is attributable server-side to a V Auth account.
+
+Moderators get a console inside the app, reachable only with a moderator role that
+is re-checked on the server for every action. Resolving a handle to a real person is
+possible, and it is deliberately awkward: it can only be done from a specific report,
+so the reason is always recorded alongside the result. The database enforces this —
+an audit row claiming a reveal with no report attached is rejected outright.
+
+This is not an uncontrolled anonymous board, and it is not intended to become one.
+If you find abuse, use the report button.
+
+## Contributing
+
+Missing a feature? Open an issue, then build it. That is the intended path here, not
+a formality — most of the v1 out-of-scope list is deliberately left for student
+contributors. New to open source, start with
+[voss-labs/first-contributions](https://github.com/voss-labs/first-contributions).
+
+Read `AGENTS.md` before your first PR. It carries the constraints that are easy to
+violate accidentally, particularly around Durable Objects, the identity mapping, and
+auth.
+
+## License
+
+TBD.

@@ -1,0 +1,40 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "v-rooms",
+  "main": "./workers/app.ts",
+  "compatibility_date": "2026-08-01",
+  // better-auth reaches for node:crypto and AsyncLocalStorage.
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    // Worker-first only where a route actually handles a non-GET request, or the
+    // asset layer answers 405 and silently breaks every form post. It is NOT
+    // "/*": that also captures Vite's dev module URLs (/app/*, /@react-router/*,
+    // /@id/*), which then reach the React Router handler, match no route, and
+    // 404 — the app renders but never hydrates. Every route exporting an action
+    // lives under /api/*, /mod, or the /ws upgrade; keep this list in step with
+    // app/routes.ts.
+    "run_worker_first": ["/api/*", "/ws", "/mod"]
+  },
+  "durable_objects": {
+    "bindings": [{ "name": "ROOM", "class_name": "RoomDurableObject" }]
+  },
+  // new_sqlite_classes is not optional: key-value backed classes do not exist
+  // on the Workers free plan (VRIP-03).
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["RoomDurableObject"] }],
+  "observability": { "enabled": true },
+  // The registered production callback is https://vroom.vosslabs.org/... so the
+  // Worker must answer on that hostname or the OAuth redirect_uri will not match.
+  "routes": [{ "pattern": "vroom.vosslabs.org", "custom_domain": true }],
+  // MOD_SCRIPT_MEMBER_HANDLE is deliberately absent until a moderator exists;
+  // api.mod.$action returns 500 while it is unset, which is the honest state.
+  "vars": {
+    "BETTER_AUTH_URL": "https://vroom.vosslabs.org",
+    "VROOMS_ORIGIN": "https://vroom.vosslabs.org",
+    "VAUTH_DISCOVERY_URL": "https://accounts.vosslabs.org/api/auth/.well-known/openid-configuration",
+    "APP_JWT_TTL_SECONDS": "900",
+    "RATE_LIMIT_MESSAGES_PER_MINUTE": "20",
+    "RATE_LIMIT_HISTORY_PER_MINUTE": "30",
+    "MESSAGE_MAX_CHARS": "500",
+    "ROOM_ID": "campus-live"
+  }
+}

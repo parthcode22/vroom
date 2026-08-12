@@ -1,0 +1,1258 @@
+<title>V Rooms Console</title>
+
+<style>
+  :root {
+    /* neutrals: vask's stone greys on a near-black terminal ground */
+    --ground: #0b0b0a;
+    --panel: #111110;
+    --panel-2: #161514;
+    --raised: #1d1b19;
+    --raised-2: #262320;
+    --line: #211f1e;
+    --line-2: #302e2b;
+    --line-3: #4a4744;
+
+    --text: #fafafa;
+    --text-2: #a8a29e;
+    --text-3: #737373;
+
+    /* VOSS brand orange, same hex as vosslabs.org and vask.
+       Reserved for your action / fresh / focused. Never for "bad". */
+    --brand: #fb7a3c;
+    --brand-deep: #c4421d;
+    --brand-dim: rgba(251, 122, 60, 0.13);
+
+    /* state, deliberately outside the brand so nothing double-encodes */
+    --neg: #9f4848;
+    --neg-dim: rgba(159, 72, 72, 0.13);
+    --ok: #5cb88a;
+
+    --radius: 4px;
+    --radius-sm: 2px;
+    --radius-item: 6px;
+    --r-card: 10px;
+    --r-ctl: 6px;
+
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+
+    color-scheme: dark;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 14px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #2a2826; border: 3px solid transparent; background-clip: padding-box; border-radius: 6px; }
+  ::-webkit-scrollbar-thumb:hover { background: #3f3b38; background-clip: padding-box; }
+
+  /* ---------- primitives ---------- */
+
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+    height: 32px; padding: 0 13px;
+    font-family: var(--sans); font-size: 13px; font-weight: 500;
+    color: var(--text); background: var(--panel-2);
+    border: 1px solid var(--line-2); border-radius: var(--radius);
+    cursor: pointer; white-space: nowrap;
+    transition: background 110ms ease, border-color 110ms ease;
+  }
+  .btn:hover { background: var(--raised); border-color: var(--line-3); }
+  .btn:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+  .btn-primary { background: var(--brand); border-color: var(--brand); color: #1a0d05; font-weight: 600; }
+  .btn-primary:hover { background: #ff8d55; border-color: #ff8d55; }
+  .btn-danger { color: var(--neg); border-color: rgba(159, 72, 72, 0.35); }
+  .btn-danger:hover { background: var(--neg-dim); border-color: var(--neg); }
+  .btn-sm { height: 26px; padding: 0 9px; font-size: 12px; }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  .tag {
+    display: inline-flex; align-items: center; gap: 6px; padding: 3px 8px;
+    font-family: var(--mono); font-size: 11px;
+    background: var(--panel-2); border: 1px solid var(--line-2);
+    border-radius: var(--radius-sm); color: var(--text-2); white-space: nowrap;
+  }
+  .tag-live { color: var(--ok); border-color: rgba(92, 184, 138, 0.3); }
+  .tag-dead { color: var(--neg); border-color: rgba(159, 72, 72, 0.35); }
+  .tag-flat { color: var(--text-3); }
+
+  .mark { width: 6px; height: 6px; flex: 0 0 auto; background: var(--ok); }
+  .mark-dead { background: var(--neg); }
+
+  .card { background: var(--panel); border: 1px solid var(--line-2); border-radius: var(--radius); }
+  .card-head {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 12px; padding: 11px 15px; border-bottom: 1px solid var(--line);
+  }
+  .card-title {
+    margin: 0; font-family: var(--mono); font-size: 11px; font-weight: 600;
+    letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-2);
+  }
+  .card-note { font-size: 12px; color: var(--text-3); }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  thead th {
+    padding: 8px 15px; text-align: left; font-family: var(--mono);
+    font-size: 10px; font-weight: 500; letter-spacing: 0.09em; text-transform: uppercase;
+    color: var(--text-3); border-bottom: 1px solid var(--line);
+  }
+  tbody td { padding: 11px 15px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+  tbody tr:last-child td { border-bottom: 0; }
+  tbody tr.resolved { opacity: 0.4; }
+  .num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+  .handle { font-family: var(--mono); font-size: 12.5px; font-weight: 600; }
+
+  .scroll-x { overflow-x: auto; }
+
+  /* ---------- frame ---------- */
+
+  .app { display: flex; flex-direction: column; height: 100vh; min-height: 560px; }
+
+  .topbar {
+    display: flex; align-items: center; gap: 18px;
+    padding: 0 16px; height: 48px; flex: 0 0 auto;
+    background: var(--panel); border-bottom: 1px solid var(--line-2);
+  }
+  .wordmark {
+    display: flex; align-items: center; gap: 9px;
+    font-family: var(--mono); font-size: 13px; font-weight: 600; letter-spacing: 0.06em;
+  }
+  .wordmark i { width: 3px; height: 14px; background: var(--brand); display: block; }
+  .wordmark small {
+    font-size: 10px; font-weight: 500; letter-spacing: 0.14em;
+    text-transform: uppercase; color: var(--text-3);
+  }
+
+  .tabs { display: flex; gap: 2px; }
+  .tab {
+    padding: 5px 12px; font-family: var(--mono); font-size: 12px; font-weight: 500;
+    color: var(--text-3); background: transparent;
+    border: 1px solid transparent; border-radius: var(--radius-sm); cursor: pointer;
+  }
+  .tab:hover { color: var(--text-2); }
+  .tab[hidden] { display: none; }
+  .tab[aria-selected="true"] { background: var(--raised); border-color: var(--line-2); color: var(--text); }
+  .tab:focus-visible { outline: 2px solid var(--brand); outline-offset: 1px; }
+
+  .topbar-right { margin-left: auto; display: flex; align-items: center; gap: 9px; }
+
+  .view { flex: 1 1 auto; min-height: 0; }
+  .view[hidden] { display: none; }
+
+  /* ---------- campus live ---------- */
+
+  .room { display: grid; grid-template-columns: 236px minmax(0, 1fr) 212px; height: 100%; min-height: 0; }
+
+  /* ----- left rail ----- */
+
+  .rail {
+    display: flex; flex-direction: column; min-height: 0;
+    background: var(--panel); border-right: 1px solid var(--line-2);
+  }
+
+  .rail-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 12px 8px 14px; }
+
+  .rail-label {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 9px 8px 6px;
+    font-family: var(--mono); font-size: 10px; font-weight: 600;
+    letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-3);
+  }
+  .rail-label span { font-variant-numeric: tabular-nums; }
+
+  .rail-item {
+    position: relative;
+    display: flex; align-items: center; gap: 7px;
+    width: 100%; padding: 7px 10px; min-height: 34px;
+    font-family: var(--mono); font-size: 13px;
+    color: var(--text-2); background: transparent;
+    border: 0; border-radius: var(--radius-item);
+    text-align: left; cursor: pointer;
+    transition: background 100ms ease, color 100ms ease;
+  }
+  .rail-item + .rail-item { margin-top: 2px; }
+  .rail-item:hover { background: var(--raised); color: var(--text); }
+  .rail-item:focus-visible { outline: 2px solid var(--brand); outline-offset: -2px; }
+  .rail-item.active { background: var(--raised-2); color: var(--text); font-weight: 600; }
+  .rail-item.active::before {
+    content: ""; position: absolute; left: -8px; top: 50%;
+    width: 3px; height: 20px; margin-top: -10px;
+    background: var(--brand); border-radius: 0 2px 2px 0;
+  }
+  .rail-hash { color: var(--text-3); }
+  .rail-item.active .rail-hash { color: var(--brand); }
+
+  .rail-item.locked { color: var(--text-3); cursor: default; }
+  .rail-item.locked:hover { background: var(--panel-2); color: var(--text-2); }
+  .rail-issue {
+    margin-left: auto; padding: 1px 6px;
+    font-family: var(--mono); font-size: 10px; letter-spacing: 0.04em;
+    color: var(--text-3); background: var(--panel-2);
+    border: 1px solid var(--line); border-radius: var(--radius-sm);
+    opacity: 0; transition: opacity 100ms ease;
+  }
+  .rail-item.locked:hover .rail-issue { opacity: 1; }
+
+  .rail-note {
+    margin: 12px 10px 0; padding-top: 11px;
+    font-size: 11.5px; line-height: 1.5; color: var(--text-3);
+    border-top: 1px solid var(--line);
+  }
+
+  /* user panel, pinned bottom — the bit Discord gets right */
+  .rail-me {
+    flex: 0 0 auto;
+    display: flex; align-items: center; gap: 9px;
+    padding: 9px 12px;
+    background: var(--panel-2); border-top: 1px solid var(--line-2);
+  }
+  .rail-me i { width: 7px; height: 7px; flex: 0 0 auto; background: var(--brand); }
+  .rail-me-text { min-width: 0; flex: 1 1 auto; }
+  .rail-me-name {
+    font-family: var(--mono); font-size: 12.5px; font-weight: 600; color: var(--brand);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .rail-me-sub { font-size: 10.5px; color: var(--text-3); }
+  .rail-me-btn {
+    flex: 0 0 auto; height: 26px; padding: 0 9px;
+    font-family: var(--mono); font-size: 11px; color: var(--text-3);
+    background: transparent; border: 1px solid var(--line-2);
+    border-radius: var(--radius-sm); cursor: pointer;
+  }
+  .rail-me-btn:hover { color: var(--text); border-color: var(--line-3); }
+  .rail-me-btn:focus-visible { outline: 2px solid var(--brand); outline-offset: 1px; }
+
+  /* ----- centre: chat ----- */
+
+  .chat { display: flex; flex-direction: column; min-height: 0; background: var(--ground); }
+
+  .chat-head {
+    display: flex; align-items: baseline; gap: 11px;
+    padding: 13px 16px; flex: 0 0 auto;
+    border-bottom: 1px solid var(--line-2);
+  }
+  .chat-title { font-family: var(--mono); font-size: 14px; font-weight: 600; }
+  .chat-sub { font-size: 12.5px; color: var(--text-3); }
+  .chat-state { margin-left: auto; }
+
+  .log { flex: 1 1 auto; overflow-y: auto; padding: 6px 0 10px; }
+
+  .row {
+    display: flex; align-items: baseline; gap: 8px;
+    padding: 5px 16px; border-left: 2px solid transparent;
+  }
+  .row:nth-child(odd) { background: rgba(255, 255, 255, 0.022); }
+  .row:hover { background: var(--panel-2); border-left-color: var(--line-3); }
+  .row-handle { flex: 0 0 auto; font-family: var(--mono); font-size: 13px; font-weight: 700; }
+  .row-body { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+  .row-time {
+    flex: 0 0 auto; font-family: var(--mono); font-size: 11px;
+    font-variant-numeric: tabular-nums; color: var(--text-3); opacity: 0;
+  }
+  .row:hover .row-time { opacity: 1; }
+  .row-act { flex: 0 0 auto; display: flex; gap: 4px; opacity: 0; }
+  .row:hover .row-act, .row:focus-within .row-act { opacity: 1; }
+  .row-btn {
+    min-width: 26px; height: 22px; padding: 0 8px;
+    font-family: var(--mono); font-size: 11px; color: var(--text-3);
+    background: var(--panel); border: 1px solid var(--line-2);
+    border-radius: var(--radius-sm); cursor: pointer;
+  }
+  .row-btn:hover { color: var(--text); border-color: var(--line-3); }
+  .row-btn.danger:hover { color: var(--neg); border-color: var(--neg); }
+  .row-btn:focus-visible { outline: 2px solid var(--brand); outline-offset: 1px; }
+
+  .row.flagged { border-left-color: var(--brand); }
+  .row.deleted .row-body, .row.blocked .row-body { color: var(--text-3); font-style: italic; }
+  .row.blocked .row-handle { color: var(--text-3); }
+
+  .sys { padding: 6px 16px; font-family: var(--mono); font-size: 12px; font-weight: 600; color: var(--text-3); }
+  .sys-join { color: var(--ok); }
+  .sys-warn { color: var(--brand); }
+  .sys-dead { color: var(--brand-deep); }
+
+  .composer {
+    flex: 0 0 auto; display: flex; gap: 9px;
+    padding: 12px 16px 14px; background: var(--ground);
+  }
+  .composer input {
+    flex: 1 1 auto; height: 40px; padding: 0 13px;
+    font-family: var(--sans); font-size: 14px; color: var(--text);
+    background: var(--panel-2); border: 1px solid var(--line-2);
+    border-radius: var(--radius-item);
+  }
+  .composer input::placeholder { color: var(--text-3); }
+  .composer input:focus { outline: none; border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-dim); }
+  .composer input:disabled { opacity: 0.5; cursor: not-allowed; }
+  .composer .btn { height: 40px; border-radius: var(--radius-item); }
+
+  /* ----- right rail ----- */
+
+  .members {
+    display: flex; flex-direction: column; min-height: 0;
+    background: var(--panel); border-left: 1px solid var(--line-2);
+    padding: 10px 8px 14px; overflow-y: auto;
+  }
+  .member {
+    display: flex; align-items: center; gap: 9px;
+    padding: 6px 10px; min-height: 30px;
+    font-family: var(--mono); font-size: 12.5px;
+    border-radius: var(--radius-item);
+  }
+  .member:hover { background: var(--raised); }
+  .member i { width: 5px; height: 5px; flex: 0 0 auto; }
+  .member span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .member.self { background: var(--panel-2); }
+
+  /* ---------- moderation: shadcn data-table idiom ---------- */
+
+  .admin { height: 100%; overflow-y: auto; padding: 26px 20px 56px; }
+  .admin-inner { max-width: 1060px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
+
+  .admin-head h1 { margin: 0 0 6px; font-size: 22px; font-weight: 600; letter-spacing: -0.02em; text-wrap: balance; }
+  .admin-head p { margin: 0; max-width: 68ch; font-size: 14px; line-height: 1.6; color: var(--text-2); }
+
+  /* stat cards */
+  .stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
+  .stat { padding: 16px 18px; background: var(--panel); border: 1px solid var(--line-2); border-radius: var(--r-card); }
+  .stat-k { font-size: 13px; font-weight: 500; color: var(--text-2); }
+  .stat-v { margin-top: 6px; font-size: 26px; font-weight: 600; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+  .stat-n { margin-top: 2px; font-size: 12px; color: var(--text-3); }
+
+  /* section card */
+  .sec { background: var(--panel); border: 1px solid var(--line-2); border-radius: var(--r-card); }
+  .sec-head { padding: 18px 18px 0; }
+  .sec-head h2 { margin: 0 0 4px; font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
+  .sec-head p { margin: 0; font-size: 13px; line-height: 1.55; color: var(--text-2); max-width: 72ch; }
+
+  /* room control */
+  .roomctl { display: flex; align-items: center; gap: 18px; padding: 18px; }
+  .roomctl-text { flex: 1 1 auto; min-width: 0; }
+  .roomctl-text h2 { margin: 0 0 4px; font-size: 15px; font-weight: 600; display: flex; align-items: center; gap: 9px; }
+  .roomctl-text p { margin: 0; font-size: 13px; line-height: 1.55; color: var(--text-2); max-width: 72ch; }
+
+  .sw {
+    position: relative; flex: 0 0 auto; width: 40px; height: 22px; padding: 0;
+    background: var(--line-2); border: 0; border-radius: 999px; cursor: pointer;
+    transition: background 140ms ease;
+  }
+  .sw::after {
+    content: ""; position: absolute; top: 2px; left: 2px; width: 18px; height: 18px;
+    background: #fafafa; border-radius: 999px;
+    transition: transform 140ms ease;
+    box-shadow: 0 1px 2px rgba(0,0,0,.4);
+  }
+  .sw[aria-checked="true"] { background: var(--neg); }
+  .sw[aria-checked="true"]::after { transform: translateX(18px); }
+  .sw:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+
+  /* toolbar */
+  .toolbar { display: flex; align-items: center; gap: 10px; padding: 16px 18px; }
+  .inp {
+    flex: 1 1 auto; max-width: 320px; height: 36px; padding: 0 12px;
+    font-family: var(--sans); font-size: 13.5px; color: var(--text);
+    background: transparent; border: 1px solid var(--line-2); border-radius: var(--r-ctl);
+  }
+  .inp::placeholder { color: var(--text-3); }
+  .inp:focus { outline: none; border-color: var(--line-3); box-shadow: 0 0 0 3px var(--brand-dim); }
+  .toolbar .right { margin-left: auto; display: flex; gap: 8px; }
+
+  /* table */
+  .tbl-wrap { padding: 0 18px; }
+  .tbl-box { border: 1px solid var(--line-2); border-radius: var(--r-ctl); overflow: hidden; }
+  .tbl { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  .tbl th {
+    padding: 11px 14px; text-align: left;
+    font-family: var(--sans); font-size: 13px; font-weight: 500;
+    letter-spacing: 0; text-transform: none; color: var(--text-2);
+    border-bottom: 1px solid var(--line-2); white-space: nowrap;
+  }
+  .tbl td { padding: 13px 14px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+  .tbl tr:last-child td { border-bottom: 0; }
+  .tbl tbody tr:hover { background: var(--panel-2); }
+  .tbl tbody tr.sel { background: var(--raised); }
+  .tbl tr.gone td { opacity: 0.42; }
+  .col-x { width: 40px; }
+  .col-a { width: 52px; }
+
+  .sortbtn {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 3px 7px; margin: -3px -7px;
+    font-family: var(--sans); font-size: 13px; font-weight: 500; color: var(--text-2);
+    background: transparent; border: 0; border-radius: var(--r-ctl); cursor: pointer;
+  }
+  .sortbtn:hover { background: var(--raised); color: var(--text); }
+  .sortbtn:focus-visible { outline: 2px solid var(--brand); outline-offset: 1px; }
+  .sortbtn i { font-style: normal; font-size: 11px; color: var(--text-3); }
+
+  .cbx {
+    appearance: none; -webkit-appearance: none;
+    width: 16px; height: 16px; margin: 0;
+    background: transparent; border: 1px solid var(--line-3); border-radius: 4px;
+    cursor: pointer; position: relative; vertical-align: middle;
+  }
+  .cbx:checked { background: var(--brand); border-color: var(--brand); }
+  .cbx:checked::after {
+    content: ""; position: absolute; left: 4.5px; top: 1px;
+    width: 4px; height: 8px; border: solid #1a0d05;
+    border-width: 0 2px 2px 0; transform: rotate(45deg);
+  }
+  .cbx:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+
+  .dots {
+    width: 30px; height: 30px; padding: 0;
+    font-size: 15px; line-height: 1; color: var(--text-2);
+    background: transparent; border: 0; border-radius: var(--r-ctl); cursor: pointer;
+  }
+  .dots:hover { background: var(--raised); color: var(--text); }
+  .dots:focus-visible { outline: 2px solid var(--brand); outline-offset: 1px; }
+
+  .menu {
+    position: fixed; z-index: 60; min-width: 190px; padding: 5px;
+    background: var(--panel); border: 1px solid var(--line-3);
+    border-radius: var(--r-ctl); box-shadow: 0 12px 34px rgba(0,0,0,.62);
+  }
+  .menu[hidden] { display: none; }
+  .menu-label { padding: 6px 9px 5px; font-size: 12px; color: var(--text-3); }
+  .menu-sep { height: 1px; margin: 5px 0; background: var(--line-2); }
+  .menu button {
+    display: flex; align-items: center; gap: 9px; width: 100%;
+    padding: 7px 9px; font-family: var(--sans); font-size: 13.5px;
+    color: var(--text); background: transparent; border: 0;
+    border-radius: 5px; text-align: left; cursor: pointer;
+  }
+  .menu button:hover { background: var(--raised); }
+  .menu button:focus-visible { outline: 2px solid var(--brand); outline-offset: -2px; }
+  .menu button.danger { color: var(--neg); }
+  .menu button.danger:hover { background: var(--neg-dim); }
+  .menu button[disabled] { opacity: .4; cursor: not-allowed; }
+  .menu button .tick { width: 13px; color: var(--brand); }
+
+  .tbl-foot {
+    display: flex; align-items: center; gap: 12px;
+    padding: 14px 18px 18px;
+    font-size: 13px; color: var(--text-2);
+  }
+  .tbl-foot .right { margin-left: auto; display: flex; gap: 8px; }
+
+  .badge {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 3px 9px; font-size: 12.5px; font-weight: 500;
+    border: 1px solid var(--line-2); border-radius: 999px; color: var(--text-2);
+  }
+  .badge-ok { color: var(--ok); border-color: rgba(92,184,138,.32); }
+  .badge-no { color: var(--neg); border-color: rgba(159,72,72,.4); }
+
+  .cell-msg { font-size: 13.5px; line-height: 1.5; overflow-wrap: anywhere; }
+  .cell-sub { margin-top: 4px; font-size: 12.5px; color: var(--text-3); }
+  .cell-handle { font-family: var(--mono); font-size: 13px; font-weight: 600; }
+  .cell-mail { font-family: var(--mono); font-size: 12.5px; color: var(--brand); overflow-wrap: anywhere; }
+  .cell-none { font-size: 13px; color: var(--text-3); }
+  .empty { padding: 34px 14px; text-align: center; font-size: 13.5px; color: var(--text-3); }
+
+  /* audit */
+  .audit-line {
+    display: grid; grid-template-columns: 52px 84px 1fr; gap: 14px;
+    padding: 11px 18px; font-size: 13px; border-bottom: 1px solid var(--line);
+  }
+  .audit-line:last-child { border-bottom: 0; }
+  .audit-t { color: var(--text-3); font-variant-numeric: tabular-nums; font-family: var(--mono); font-size: 12px; }
+  .audit-a { font-weight: 500; color: var(--text-2); }
+  .audit-a.hot { color: var(--neg); }
+  .audit-a.rev { color: var(--brand); }
+  .audit-d { color: var(--text-2); overflow-wrap: anywhere; }
+
+
+  .sr { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+
+  @media (max-width: 1040px) {
+    .room { grid-template-columns: 214px minmax(0, 1fr); }
+    .members { display: none; }
+  }
+  @media (max-width: 720px) {
+    .room { grid-template-columns: 1fr; }
+    .rail { display: none; }
+    .row-time { display: none; }
+    .row-act { opacity: 1; }
+    .row-btn { min-width: 44px; height: 30px; }
+    .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .toolbar { flex-wrap: wrap; }
+    .inp { max-width: none; }
+    .wordmark small { display: none; }
+  }
+</style>
+
+<div class="app">
+  <header class="topbar">
+    <div class="wordmark"><i></i>V ROOMS <small>voss labs</small></div>
+
+    <div class="tabs" role="tablist" aria-label="View">
+      <button class="tab" role="tab" id="tab-room" aria-selected="true" aria-controls="view-room">Campus Live</button>
+      <button class="tab" role="tab" id="tab-mod" aria-selected="false" aria-controls="view-mod">Moderation</button>
+    </div>
+
+    <div class="topbar-right">
+      <span class="tag tag-live" id="pill"><span class="mark" id="pill-mark"></span><span id="pill-count">14</span> online</span>
+      <button class="tag" id="role-btn" title="Prototype only. In the real app the role comes from the account.">moderator</button>
+    </div>
+  </header>
+
+  <section class="view" id="view-room" role="tabpanel" aria-labelledby="tab-room">
+    <div class="room">
+
+      <nav class="rail">
+        <div class="rail-scroll">
+          <div class="rail-label">Rooms</div>
+          <button class="rail-item active"><span class="rail-hash">#</span> campus-live</button>
+
+          <div class="rail-label">Not built yet <span>4</span></div>
+          <button class="rail-item locked"><span class="rail-hash">#</span> placements<span class="rail-issue">issue</span></button>
+          <button class="rail-item locked"><span class="rail-hash">#</span> electives<span class="rail-issue">issue</span></button>
+          <button class="rail-item locked"><span class="rail-hash">#</span> hostel<span class="rail-issue">issue</span></button>
+          <button class="rail-item locked"><span class="rail-hash">#</span> projects<span class="rail-issue">issue</span></button>
+
+          <p class="rail-note">Each one is an open issue. Claim it and it ships under your name.</p>
+        </div>
+
+        <div class="rail-me">
+          <i></i>
+          <div class="rail-me-text">
+            <div class="rail-me-name">quiet-ibex</div>
+            <div class="rail-me-sub">your handle here, permanently</div>
+          </div>
+          <button class="rail-me-btn" id="blocked-btn">blocks</button>
+        </div>
+      </nav>
+
+      <main class="chat">
+        <div class="chat-head">
+          <span class="chat-title">#campus-live</span>
+          <span class="chat-sub">one room, the whole college</span>
+          <span class="chat-state" id="chat-state"></span>
+        </div>
+        <div class="log" id="log" role="log" aria-live="polite" aria-label="Campus Live messages"></div>
+        <form class="composer" id="composer">
+          <label class="sr" for="msg">Message Campus Live</label>
+          <input id="msg" autocomplete="off" placeholder="Say something to the college" />
+          <button class="btn btn-primary" type="submit" id="send">Send</button>
+        </form>
+      </main>
+
+      <aside class="members">
+        <div class="rail-label">Online <span id="member-count">14</span></div>
+        <div id="member-list"></div>
+      </aside>
+
+    </div>
+  </section>
+
+  <section class="view" id="view-mod" role="tabpanel" aria-labelledby="tab-mod" hidden>
+    <div class="admin">
+      <div class="admin-inner">
+
+        <div class="admin-head">
+          <h1>Moderation</h1>
+          <p>Students see handles only. You can resolve a handle to a real account, and every time you do it is recorded against the message that justified it.</p>
+        </div>
+
+        <div class="stats">
+          <div class="stat"><div class="stat-k">Open reports</div><div class="stat-v" id="s-open">2</div><div class="stat-n">awaiting a decision</div></div>
+          <div class="stat"><div class="stat-k">Online now</div><div class="stat-v" id="s-online">14</div><div class="stat-n">peak today 21</div></div>
+          <div class="stat"><div class="stat-k">Suspended</div><div class="stat-v" id="s-susp">0</div><div class="stat-n">cannot rejoin</div></div>
+          <div class="stat"><div class="stat-k">Messages kept</div><div class="stat-v">8,412</div><div class="stat-n">since 4 Aug</div></div>
+        </div>
+
+        <div class="sec">
+          <div class="roomctl">
+            <div class="roomctl-text">
+              <h2>Room status <span class="badge badge-ok" id="room-badge">Open</span></h2>
+              <p id="kill-desc">Closing the room freezes it for everyone within a second. History stays readable, nobody can post. Use it when reports arrive faster than you can act on them.</p>
+            </div>
+            <button class="sw" id="kill" role="switch" aria-checked="false" aria-label="Close the room"></button>
+          </div>
+        </div>
+
+        <div class="sec">
+          <div class="sec-head">
+            <h2>Reports</h2>
+            <p>A reveal is only reachable from a report, so every identity lookup is bound to a message.</p>
+          </div>
+          <div class="toolbar">
+            <input class="inp" id="f-rep" placeholder="Filter reports..." aria-label="Filter reports" />
+            <div class="right">
+              <button class="btn" id="cols-rep" aria-haspopup="true" aria-expanded="false">Columns <span aria-hidden="true">▾</span></button>
+            </div>
+          </div>
+          <div class="tbl-wrap">
+            <div class="tbl-box">
+              <table class="tbl">
+                <thead><tr>
+                  <th class="col-x"><input type="checkbox" class="cbx" id="all-rep" aria-label="Select all reports" /></th>
+                  <th>Reported message</th>
+                  <th data-col="author"><button class="sortbtn" data-sort="rep:who">Author <i aria-hidden="true">↕</i></button></th>
+                  <th data-col="identity">Identity</th>
+                  <th class="col-a"></th>
+                </tr></thead>
+                <tbody id="reports"></tbody>
+              </table>
+              <div class="empty" id="reports-empty" hidden>No reports match that filter.</div>
+            </div>
+          </div>
+          <div class="tbl-foot">
+            <span id="foot-rep">0 of 2 row(s) selected.</span>
+            <div class="right">
+              <button class="btn btn-sm" disabled>Previous</button>
+              <button class="btn btn-sm" disabled>Next</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="sec">
+          <div class="sec-head">
+            <h2>Accounts</h2>
+            <p>No email column here by design. Suspending is enough to remove someone; naming them requires a report.</p>
+          </div>
+          <div class="toolbar">
+            <input class="inp" id="f-acc" placeholder="Filter handles..." aria-label="Filter handles" />
+            <div class="right">
+              <button class="btn" id="cols-acc" aria-haspopup="true" aria-expanded="false">Columns <span aria-hidden="true">▾</span></button>
+            </div>
+          </div>
+          <div class="tbl-wrap">
+            <div class="tbl-box">
+              <table class="tbl">
+                <thead><tr>
+                  <th class="col-x"><input type="checkbox" class="cbx" id="all-acc" aria-label="Select all accounts" /></th>
+                  <th><button class="sortbtn" data-sort="acc:who">Handle <i aria-hidden="true">↕</i></button></th>
+                  <th data-col="messages"><button class="sortbtn" data-sort="acc:msgs">Messages <i aria-hidden="true">↕</i></button></th>
+                  <th data-col="status">Status</th>
+                  <th class="col-a"></th>
+                </tr></thead>
+                <tbody id="accounts"></tbody>
+              </table>
+              <div class="empty" id="accounts-empty" hidden>No handles match that filter.</div>
+            </div>
+          </div>
+          <div class="tbl-foot">
+            <span id="foot-acc">0 of 8 row(s) selected.</span>
+            <div class="right">
+              <button class="btn btn-sm" disabled>Previous</button>
+              <button class="btn btn-sm" disabled>Next</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="sec">
+          <div class="sec-head" style="padding-bottom:14px">
+            <h2>Audit</h2>
+            <p>Every moderator action, newest first. A reveal records the message it was bound to.</p>
+          </div>
+          <div id="audit" style="border-top:1px solid var(--line-2)"></div>
+        </div>
+
+      </div>
+    </div>
+  </section>
+</div>
+
+<div class="menu" id="menu" hidden role="menu"></div>
+
+<dialog id="dlg">
+  <div class="dlg-body">
+    <h2>Reveal identity</h2>
+    <p>This resolves a handle to a real V Auth account and writes an audit row naming you and the message below.</p>
+    <div class="dlg-quote" id="dlg-quote"></div>
+  </div>
+  <div class="dlg-foot">
+    <button class="btn" id="dlg-cancel">Cancel</button>
+    <button class="btn btn-danger" id="dlg-ok">Reveal</button>
+  </div>
+</dialog>
+
+<script>
+(function () {
+  "use strict";
+
+  /* Eight handle colours held at matched lightness and saturation so no
+     speaker outshouts another. The orange-red band is deliberately absent:
+     brand orange means "you", muted red means "bad". */
+  var PALETTE = ["#5cb88a", "#4fa9a6", "#5f9fd0", "#8093dd", "#a98ad4", "#c98ac0", "#cfa04e", "#8fb45f"];
+
+  var state = {
+    role: "moderator",
+    killed: false,
+    blocked: new Set(),
+    me: "quiet-ibex",
+    online: 14,
+    nextId: 100,
+    messages: [
+      { k: "sys", tone: "join", text: "You joined as quiet-ibex. Nobody here can see your name." },
+      { id: 1, who: "swift-heron", text: "anyone actually got the TCS mail today or is it just me refreshing for nothing" },
+      { id: 2, who: "polite-okapi", text: "got it 20 mins back. check spam, mine landed there" },
+      { id: 3, who: "swift-heron", text: "found it. thank you genuinely" },
+      { k: "sys", tone: "join", text: "brave-lynx joined" },
+      { id: 4, who: "brave-lynx", text: "is the DBMS lab submission tonight or tomorrow midnight" },
+      { id: 5, who: "mellow-tapir", text: "tomorrow 11:59. the portal says tonight but it was pushed" },
+      { id: 6, who: "brave-lynx", text: "saved me. that portal is never right" },
+      { id: 7, who: "clever-marmot", text: "which open elective is actually manageable with placements going on" },
+      { id: 8, who: "polite-okapi", text: "took the digital systems one last sem, attendance is relaxed and the ISA is open book" },
+      { id: 15, who: "polite-okapi", text: "the labs are the only part that eats a weekend" },
+      { id: 9, who: "grumpy-heron", text: "the ADC prof marks so harshly it is genuinely unfair to everyone in div A", reported: true },
+      { id: 10, who: "clever-marmot", text: "anyone up for a study group in the library around 4" },
+      { id: 11, who: "sunny-otter", text: "im in. third floor near the windows" },
+      { id: 12, who: "hazy-newt", text: "ping me on 98765 43210 if you are coming", flagged: true, reported: true },
+      { id: 13, who: "mellow-tapir", text: "do not put your number here, that is exactly what this place is for avoiding" },
+      { id: 14, who: "sunny-otter", text: "mess food today was actually edible for once. logging it for history" }
+    ],
+    reports: [
+      { rid: 1, mid: 9, who: "grumpy-heron", text: "the ADC prof marks so harshly it is genuinely unfair to everyone in div A", reason: "targets a member of staff", revealed: false, done: false },
+      { rid: 2, mid: 12, who: "hazy-newt", text: "ping me on 98765 43210 if you are coming", reason: "personal contact details", revealed: false, done: false }
+    ],
+    accounts: [
+      { who: "swift-heron", msgs: 214, susp: false },
+      { who: "polite-okapi", msgs: 188, susp: false },
+      { who: "mellow-tapir", msgs: 141, susp: false },
+      { who: "clever-marmot", msgs: 96, susp: false },
+      { who: "grumpy-heron", msgs: 73, susp: false },
+      { who: "hazy-newt", msgs: 44, susp: false },
+      { who: "sunny-otter", msgs: 31, susp: false },
+      { who: "brave-lynx", msgs: 12, susp: false }
+    ],
+    emails: {
+      "grumpy-heron": "rohan.deshpande@vit.edu.in",
+      "hazy-newt": "aditi.kulkarni@vit.edu.in"
+    },
+    audit: [
+      { t: "14:02", a: "open", cls: "", d: "room opened for placement week by harshal.more@vosslabs.org" }
+    ]
+  };
+
+  var members = ["swift-heron","polite-okapi","mellow-tapir","clever-marmot","grumpy-heron","hazy-newt","sunny-otter","brave-lynx","quiet-ibex","frosty-quail","jolly-vole","keen-shrike","witty-dace","spry-linnet"];
+
+  function colour(handle) {
+    if (handle === state.me) return "#fb7a3c";
+    var h = 0;
+    for (var i = 0; i < handle.length; i++) h = (h * 31 + handle.charCodeAt(i)) >>> 0;
+    return PALETTE[h % PALETTE.length];
+  }
+
+  var $ = function (id) { return document.getElementById(id); };
+  function el(tag, cls, text) {
+    var n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text != null) n.textContent = text;
+    return n;
+  }
+  function clock() {
+    var d = new Date();
+    return String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
+  }
+
+  /* ---------------- chat ---------------- */
+
+  function renderLog() {
+    var log = $("log");
+    log.textContent = "";
+
+    state.messages.forEach(function (m) {
+      if (m.k === "sys") {
+        log.appendChild(el("div", "sys" + (m.tone ? " sys-" + m.tone : ""), m.text));
+        return;
+      }
+
+      var blocked = state.blocked.has(m.who);
+      var row = el("div", "row"
+        + (m.flagged ? " flagged" : "")
+        + (m.deleted ? " deleted" : "")
+        + (blocked ? " blocked" : ""));
+
+      var h = el("span", "row-handle", (blocked ? "blocked" : m.who) + ":");
+      if (!blocked) h.style.color = colour(m.who);
+      row.appendChild(h);
+
+      if (m.deleted) row.appendChild(el("span", "row-body", "message removed by a moderator"));
+      else if (blocked) row.appendChild(el("span", "row-body", "you blocked this person"));
+      else row.appendChild(el("span", "row-body", m.text));
+
+      row.appendChild(el("span", "row-time", "14:" + String(20 + (m.id % 39)).padStart(2, "0")));
+
+      if (!m.deleted && !blocked && m.who !== state.me) {
+        var acts = el("div", "row-act");
+
+        var rep = el("button", "row-btn", m.reported ? "reported" : "report");
+        rep.setAttribute("aria-label", "Report message from " + m.who);
+        if (m.reported) rep.disabled = true;
+        rep.onclick = function () { report(m); };
+        acts.appendChild(rep);
+
+        var blk = el("button", "row-btn danger", "block");
+        blk.setAttribute("aria-label", "Block " + m.who);
+        blk.onclick = function () { state.blocked.add(m.who); renderLog(); renderBlocks(); };
+        acts.appendChild(blk);
+
+        row.appendChild(acts);
+      }
+
+      log.appendChild(row);
+    });
+
+    log.scrollTop = log.scrollHeight;
+  }
+
+  function renderBlocks() {
+    $("blocked-btn").textContent = state.blocked.size ? "blocks " + state.blocked.size : "blocks";
+  }
+  $("blocked-btn").onclick = function () {
+    if (!state.blocked.size) return;
+    state.blocked.clear();
+    renderLog(); renderBlocks();
+  };
+
+  function report(m) {
+    if (m.reported) return;
+    m.reported = true;
+    state.reports.push({
+      rid: ++state.nextId, mid: m.id, who: m.who, text: m.text,
+      reason: "reported by a student", revealed: false, done: false
+    });
+    renderLog(); renderReports(); renderStats();
+  }
+
+  function renderMembers() {
+    var list = $("member-list");
+    list.textContent = "";
+    members.forEach(function (w) {
+      var self = w === state.me;
+      var m = el("div", "member" + (self ? " self" : ""));
+      var sw = el("i");
+      sw.style.background = colour(w);
+      m.appendChild(sw);
+      var name = el("span", null, self ? w + " (you)" : w);
+      name.style.color = self ? "#fb7a3c" : "var(--text-2)";
+      m.appendChild(name);
+      list.appendChild(m);
+    });
+    $("member-count").textContent = String(members.length);
+  }
+
+  $("composer").addEventListener("submit", function (e) {
+    e.preventDefault();
+    var input = $("msg");
+    var v = input.value.trim();
+    if (!v || state.killed) return;
+    state.messages.push({ id: ++state.nextId, who: state.me, text: v });
+    input.value = "";
+    renderLog();
+  });
+
+  /* ---------------- moderation ---------------- */
+
+  var ui = {
+    fRep: "", fAcc: "",
+    selRep: new Set(), selAcc: new Set(),
+    sortRep: { key: null, dir: 1 }, sortAcc: { key: null, dir: 1 },
+    hideRep: new Set(), hideAcc: new Set()
+  };
+
+  function applyCols(scopeId, hidden) {
+    var scope = $(scopeId).closest(".sec");
+    scope.querySelectorAll("[data-col]").forEach(function (n) {
+      n.style.display = hidden.has(n.getAttribute("data-col")) ? "none" : "";
+    });
+  }
+
+  function sortRows(rows, st, get) {
+    if (!st.key) return rows;
+    return rows.slice().sort(function (a, b) {
+      var x = get(a, st.key), y = get(b, st.key);
+      if (x === y) return 0;
+      return (x > y ? 1 : -1) * st.dir;
+    });
+  }
+
+  function renderStats() {
+    $("s-open").textContent = String(state.reports.filter(function (r) { return !r.done; }).length);
+    $("s-online").textContent = state.killed ? "0" : String(state.online);
+    $("s-susp").textContent = String(state.accounts.filter(function (a) { return a.susp; }).length);
+    $("pill-count").textContent = state.killed ? "0" : String(state.online);
+  }
+
+  /* ----- generic row menu ----- */
+
+  var menu = $("menu");
+  function closeMenu() {
+    menu.hidden = true;
+    menu.textContent = "";
+  }
+  function openMenu(anchor, items) {
+    menu.textContent = "";
+    items.forEach(function (it) {
+      if (it.sep) { menu.appendChild(el("div", "menu-sep")); return; }
+      if (it.label) { menu.appendChild(el("div", "menu-label", it.label)); return; }
+      var b = el("button", it.danger ? "danger" : null);
+      if (it.tick !== undefined) {
+        var t = el("span", "tick", it.tick ? "✓" : "");
+        b.appendChild(t);
+      }
+      b.appendChild(el("span", null, it.text));
+      b.disabled = !!it.disabled;
+      b.setAttribute("role", "menuitem");
+      b.onclick = function (e) {
+        e.stopPropagation();
+        if (!it.keepOpen) closeMenu();
+        it.run && it.run();
+      };
+      menu.appendChild(b);
+    });
+    menu.hidden = false;
+    var r = anchor.getBoundingClientRect();
+    var w = menu.offsetWidth, h = menu.offsetHeight;
+    var left = Math.min(r.right - w, window.innerWidth - w - 10);
+    var top = r.bottom + 6;
+    if (top + h > window.innerHeight - 10) top = r.top - h - 6;
+    menu.style.left = Math.max(10, left) + "px";
+    menu.style.top = Math.max(10, top) + "px";
+  }
+  document.addEventListener("click", function () { if (!menu.hidden) closeMenu(); });
+  document.addEventListener("keydown", function (e) { if (e.key === "Escape") closeMenu(); });
+
+  /* ----- reports ----- */
+
+  function visibleReports() {
+    var q = ui.fRep.trim().toLowerCase();
+    var rows = state.reports.filter(function (r) {
+      return !q || r.text.toLowerCase().indexOf(q) > -1 || r.who.toLowerCase().indexOf(q) > -1;
+    });
+    return sortRows(rows, ui.sortRep, function (r, k) { return r[k]; });
+  }
+
+  function renderReports() {
+    var body = $("reports");
+    body.textContent = "";
+    var rows = visibleReports();
+    $("reports-empty").hidden = rows.length > 0;
+
+    rows.forEach(function (r) {
+      var tr = el("tr", r.done ? "gone" : null);
+      if (ui.selRep.has(r.rid)) tr.className = (tr.className ? tr.className + " " : "") + "sel";
+
+      var cx = el("td", "col-x");
+      var cb = document.createElement("input");
+      cb.type = "checkbox"; cb.className = "cbx";
+      cb.checked = ui.selRep.has(r.rid);
+      cb.setAttribute("aria-label", "Select report on message " + r.mid);
+      cb.onchange = function () {
+        if (cb.checked) ui.selRep.add(r.rid); else ui.selRep.delete(r.rid);
+        renderReports();
+      };
+      cx.appendChild(cb);
+      tr.appendChild(cx);
+
+      var c1 = el("td");
+      c1.appendChild(el("div", "cell-msg", r.text));
+      c1.appendChild(el("div", "cell-sub", "Message " + r.mid + " · " + r.reason));
+      tr.appendChild(c1);
+
+      var c2 = el("td", "cell-handle", r.who);
+      c2.setAttribute("data-col", "author");
+      c2.style.color = colour(r.who);
+      tr.appendChild(c2);
+
+      var c3 = el("td");
+      c3.setAttribute("data-col", "identity");
+      c3.appendChild(r.revealed
+        ? el("span", "cell-mail", state.emails[r.who] || "student@vit.edu.in")
+        : el("span", "cell-none", r.done ? "not revealed" : "Not revealed"));
+      tr.appendChild(c3);
+
+      var c4 = el("td", "col-a");
+      var dots = el("button", "dots", "⋯");
+      dots.setAttribute("aria-label", "Actions for this report");
+      dots.setAttribute("aria-haspopup", "true");
+      dots.onclick = function (e) {
+        e.stopPropagation();
+        openMenu(dots, [
+          { label: "Report on message " + r.mid },
+          { text: "Reveal identity", disabled: r.done || r.revealed, run: function () { askReveal(r); } },
+          { sep: true },
+          { text: "Delete message", danger: true, disabled: r.done, run: function () { deleteMsg(r); } },
+          { text: "Suspend " + r.who, danger: true, disabled: r.done, run: function () { suspend(r); } },
+          { sep: true },
+          { text: "Dismiss report", disabled: r.done, run: function () {
+              r.done = true;
+              log_("dismiss", "", "report on message " + r.mid + " dismissed");
+              renderReports(); renderStats();
+            } }
+        ]);
+      };
+      c4.appendChild(dots);
+      tr.appendChild(c4);
+
+      body.appendChild(tr);
+    });
+
+    $("foot-rep").textContent = ui.selRep.size + " of " + rows.length + " row(s) selected.";
+    $("all-rep").checked = rows.length > 0 && rows.every(function (r) { return ui.selRep.has(r.rid); });
+    applyCols("reports", ui.hideRep);
+  }
+
+  $("f-rep").oninput = function () { ui.fRep = this.value; renderReports(); };
+  $("all-rep").onchange = function () {
+    var rows = visibleReports();
+    if (this.checked) rows.forEach(function (r) { ui.selRep.add(r.rid); });
+    else ui.selRep.clear();
+    renderReports();
+  };
+  $("cols-rep").onclick = function (e) {
+    e.stopPropagation();
+    var self = this;
+    openMenu(self, [
+      { label: "Toggle columns" },
+      { text: "Author", tick: !ui.hideRep.has("author"), keepOpen: true, run: function () {
+          ui.hideRep.has("author") ? ui.hideRep.delete("author") : ui.hideRep.add("author");
+          renderReports(); self.click();
+        } },
+      { text: "Identity", tick: !ui.hideRep.has("identity"), keepOpen: true, run: function () {
+          ui.hideRep.has("identity") ? ui.hideRep.delete("identity") : ui.hideRep.add("identity");
+          renderReports(); self.click();
+        } }
+    ]);
+  };
+
+  /* ----- accounts ----- */
+
+  function visibleAccounts() {
+    var q = ui.fAcc.trim().toLowerCase();
+    var rows = state.accounts.filter(function (a) { return !q || a.who.toLowerCase().indexOf(q) > -1; });
+    return sortRows(rows, ui.sortAcc, function (a, k) { return a[k]; });
+  }
+
+  function renderAccounts() {
+    var body = $("accounts");
+    body.textContent = "";
+    var rows = visibleAccounts();
+    $("accounts-empty").hidden = rows.length > 0;
+
+    rows.forEach(function (a) {
+      var tr = el("tr", ui.selAcc.has(a.who) ? "sel" : null);
+
+      var cx = el("td", "col-x");
+      var cb = document.createElement("input");
+      cb.type = "checkbox"; cb.className = "cbx";
+      cb.checked = ui.selAcc.has(a.who);
+      cb.setAttribute("aria-label", "Select " + a.who);
+      cb.onchange = function () {
+        if (cb.checked) ui.selAcc.add(a.who); else ui.selAcc.delete(a.who);
+        renderAccounts();
+      };
+      cx.appendChild(cb);
+      tr.appendChild(cx);
+
+      var c1 = el("td", "cell-handle", a.who);
+      c1.style.color = colour(a.who);
+      tr.appendChild(c1);
+
+      var c2 = el("td", "num", String(a.msgs));
+      c2.setAttribute("data-col", "messages");
+      tr.appendChild(c2);
+
+      var c3 = el("td");
+      c3.setAttribute("data-col", "status");
+      c3.appendChild(el("span", "badge " + (a.susp ? "badge-no" : "badge-ok"), a.susp ? "Suspended" : "Active"));
+      tr.appendChild(c3);
+
+      var c4 = el("td", "col-a");
+      var dots = el("button", "dots", "⋯");
+      dots.setAttribute("aria-label", "Actions for " + a.who);
+      dots.setAttribute("aria-haspopup", "true");
+      dots.onclick = function (e) {
+        e.stopPropagation();
+        openMenu(dots, [
+          { label: a.who },
+          { text: "Copy handle", run: function () {} },
+          { sep: true },
+          { text: a.susp ? "Restore account" : "Suspend account", danger: !a.susp, run: function () {
+              a.susp = !a.susp;
+              log_(a.susp ? "suspend" : "restore", a.susp ? "hot" : "",
+                a.who + (a.susp ? " suspended, cannot rejoin" : " restored"));
+              renderAccounts(); renderStats();
+            } }
+        ]);
+      };
+      c4.appendChild(dots);
+      tr.appendChild(c4);
+
+      body.appendChild(tr);
+    });
+
+    $("foot-acc").textContent = ui.selAcc.size + " of " + rows.length + " row(s) selected.";
+    $("all-acc").checked = rows.length > 0 && rows.every(function (a) { return ui.selAcc.has(a.who); });
+    applyCols("accounts", ui.hideAcc);
+  }
+
+  $("f-acc").oninput = function () { ui.fAcc = this.value; renderAccounts(); };
+  $("all-acc").onchange = function () {
+    var rows = visibleAccounts();
+    if (this.checked) rows.forEach(function (a) { ui.selAcc.add(a.who); });
+    else ui.selAcc.clear();
+    renderAccounts();
+  };
+  $("cols-acc").onclick = function (e) {
+    e.stopPropagation();
+    var self = this;
+    openMenu(self, [
+      { label: "Toggle columns" },
+      { text: "Messages", tick: !ui.hideAcc.has("messages"), keepOpen: true, run: function () {
+          ui.hideAcc.has("messages") ? ui.hideAcc.delete("messages") : ui.hideAcc.add("messages");
+          renderAccounts(); self.click();
+        } },
+      { text: "Status", tick: !ui.hideAcc.has("status"), keepOpen: true, run: function () {
+          ui.hideAcc.has("status") ? ui.hideAcc.delete("status") : ui.hideAcc.add("status");
+          renderAccounts(); self.click();
+        } }
+    ]);
+  };
+
+  document.querySelectorAll(".sortbtn").forEach(function (b) {
+    b.onclick = function () {
+      var parts = b.getAttribute("data-sort").split(":");
+      var st = parts[0] === "rep" ? ui.sortRep : ui.sortAcc;
+      st.dir = st.key === parts[1] ? -st.dir : 1;
+      st.key = parts[1];
+      b.querySelector("i").textContent = st.dir === 1 ? "↑" : "↓";
+      parts[0] === "rep" ? renderReports() : renderAccounts();
+    };
+  });
+
+  /* ----- audit ----- */
+
+  function log_(action, cls, detail) {
+    state.audit.unshift({ t: clock(), a: action, cls: cls || "", d: detail });
+    renderAudit();
+  }
+
+  function renderAudit() {
+    var box = $("audit");
+    box.textContent = "";
+    state.audit.forEach(function (e) {
+      var line = el("div", "audit-line");
+      line.appendChild(el("span", "audit-t", e.t));
+      line.appendChild(el("span", "audit-a " + e.cls, e.a));
+      line.appendChild(el("span", "audit-d", e.d));
+      box.appendChild(line);
+    });
+  }
+
+  function deleteMsg(r) {
+    var m = state.messages.filter(function (x) { return x.id === r.mid; })[0];
+    if (m) m.deleted = true;
+    r.done = true;
+    log_("delete", "hot", "message " + r.mid + " by " + r.who + " removed");
+    renderLog(); renderReports(); renderStats();
+  }
+
+  function suspend(r) {
+    var a = state.accounts.filter(function (x) { return x.who === r.who; })[0];
+    if (a) a.susp = true;
+    r.done = true;
+    state.messages.push({ k: "sys", tone: "warn", text: r.who + " was suspended by a moderator" });
+    log_("suspend", "hot", r.who + " suspended over message " + r.mid);
+    renderLog(); renderReports(); renderAccounts(); renderStats();
+  }
+
+  var pending = null;
+  var dlg = $("dlg");
+
+  function askReveal(r) {
+    pending = r;
+    $("dlg-quote").textContent = "“" + r.text + "”  — " + r.who + ", message " + r.mid;
+    dlg.showModal();
+  }
+  $("dlg-cancel").onclick = function () { dlg.close(); pending = null; };
+  $("dlg-ok").onclick = function () {
+    if (pending) {
+      pending.revealed = true;
+      log_("reveal", "rev", (state.emails[pending.who] || "student@vit.edu.in")
+        + " resolved from " + pending.who + ", bound to message " + pending.mid);
+      renderReports();
+    }
+    dlg.close();
+    pending = null;
+  };
+
+  $("kill").addEventListener("click", function () {
+    state.killed = !state.killed;
+    this.setAttribute("aria-checked", String(state.killed));
+
+    var badge = $("room-badge");
+    badge.textContent = state.killed ? "Closed" : "Open";
+    badge.className = "badge " + (state.killed ? "badge-no" : "badge-ok");
+
+    $("kill-desc").textContent = state.killed
+      ? "Nobody can post. History stays readable, and the room says so rather than looking broken. Reopen when you have hands on it."
+      : "Closing the room freezes it for everyone within a second. History stays readable, nobody can post. Use it when reports arrive faster than you can act on them.";
+
+    $("msg").disabled = state.killed;
+    $("send").disabled = state.killed;
+    $("msg").placeholder = state.killed ? "The room is closed" : "Say something to the college";
+    $("pill-mark").classList.toggle("mark-dead", state.killed);
+    $("pill").classList.toggle("tag-live", !state.killed);
+    $("pill").classList.toggle("tag-dead", state.killed);
+
+    var st = $("chat-state");
+    st.textContent = "";
+    if (state.killed) st.appendChild(el("span", "tag tag-dead", "closed"));
+
+    state.messages.push(state.killed
+      ? { k: "sys", tone: "dead", text: "A moderator closed the room. You can read, you cannot post." }
+      : { k: "sys", tone: "join", text: "The room is open again." });
+
+    log_(state.killed ? "close" : "open", state.killed ? "hot" : "",
+      state.killed ? "kill switch on, all posting halted" : "kill switch off, posting resumed");
+
+    renderLog(); renderStats();
+  });
+
+  function show(which) {
+    var room = which === "room";
+    $("view-room").hidden = !room;
+    $("view-mod").hidden = room;
+    $("tab-room").setAttribute("aria-selected", String(room));
+    $("tab-mod").setAttribute("aria-selected", String(!room));
+  }
+  $("tab-room").onclick = function () { show("room"); };
+  $("tab-mod").onclick = function () { show("mod"); };
+
+  /* Moderation is moderator-only. The button below exists only in this
+     prototype; in the real app the role comes from the account. */
+  function applyRole() {
+    var mod = state.role === "moderator";
+    $("tab-mod").hidden = !mod;
+    $("role-btn").textContent = mod ? "moderator" : "student";
+    if (!mod) show("room");
+  }
+  $("role-btn").onclick = function () {
+    state.role = state.role === "moderator" ? "student" : "moderator";
+    applyRole();
+  };
+  applyRole();
+
+  renderLog();
+  renderBlocks();
+  renderMembers();
+  renderReports();
+  renderAccounts();
+  renderAudit();
+  renderStats();
+})();
+</script>
