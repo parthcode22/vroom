@@ -11,6 +11,9 @@
 .dev.vars.*
 .wrangler/
 
+# Process artifacts: the referee is the source of truth, not the repo
+.preset/
+
 # Secrets — never commit
 .env.*
 !.env.example
