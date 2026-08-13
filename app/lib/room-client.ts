@@ -2,6 +2,7 @@ import {
   CLOSE,
   PAGE_SIZE,
   PROTOCOL_ID,
+  type DeletedBy,
   type EphemeralMsg,
   type Msg,
   type ServerFrame,
@@ -42,12 +43,22 @@ export interface RoomHandlers {
   onMessage(msg: Msg): void;
   /** Broadcast but never stored. The client is what removes it (VRIP-10). */
   onEphemeral(msg: EphemeralMsg): void;
-  onDeleted(id: string): void;
+  /** Withdrawn by its author, or removed by a moderator (VRIP-11). */
+  onDeleted(id: string, by: DeletedBy): void;
   onPresence(count: number, members: string[]): void;
   onRoom(killed: boolean): void;
   onSystem(tone: SystemTone, text: string): void;
   onHistory(messages: Msg[], hasMore: boolean): void;
   onError(code: string, message: string, retryAfter?: number): void;
+}
+
+/**
+ * Who a `deleted` frame credits. Anything but an explicit "author" is read as a
+ * moderator's removal, so a frame from a server that predates VRIP-11 keeps
+ * reading the way it always did rather than crediting the author for it.
+ */
+export function deletionActor(by: unknown): DeletedBy {
+  return by === "author" ? "author" : "moderator";
 }
 
 const BLOCK_KEY = "v-rooms.blocked";
@@ -103,6 +114,17 @@ export class RoomConnection {
   send(body: string, confirmed = false): boolean {
     if (this.socket?.readyState !== WebSocket.OPEN) return false;
     this.socket.send(JSON.stringify({ t: "send", body, confirmed }));
+    return true;
+  }
+
+  /**
+   * Withdraw one of your own messages (VRIP-11). The frame carries the id only:
+   * the room authorises against the handle on this socket, so sending a handle
+   * would be sending something the room refuses to read.
+   */
+  withdraw(id: string): boolean {
+    if (this.socket?.readyState !== WebSocket.OPEN) return false;
+    this.socket.send(JSON.stringify({ t: "withdraw", id }));
     return true;
   }
 
@@ -191,7 +213,7 @@ export class RoomConnection {
       case "ephemeral":
         return this.handlers.onEphemeral(frame.m);
       case "deleted":
-        return this.handlers.onDeleted(frame.id);
+        return this.handlers.onDeleted(frame.id, deletionActor(frame.by));
       case "presence":
         return this.handlers.onPresence(frame.count, frame.members);
       case "room":

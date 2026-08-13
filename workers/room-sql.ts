@@ -6,9 +6,9 @@
  * exists alongside the public `id`.
  */
 
-import type { Msg } from "./protocol";
+import type { DeletedBy, Msg } from "./protocol";
 
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 
 /**
  * A type alias rather than an interface on purpose: `sql.exec<T>` constrains T
@@ -22,6 +22,7 @@ type MessageRow = {
   body: string;
   created_at: number;
   deleted_at: number | null;
+  deleted_by: string | null;
 };
 
 function toMsg(row: MessageRow): Msg {
@@ -42,9 +43,11 @@ export function ensureSchema(sql: SqlStorage): void {
       pseudonym  TEXT NOT NULL,
       body       TEXT NOT NULL,
       created_at INTEGER NOT NULL,
-      deleted_at INTEGER
+      deleted_at INTEGER,
+      deleted_by TEXT
     );
   `);
+  addDeletedBy(sql);
   sql.exec(
     `CREATE INDEX IF NOT EXISTS idx_messages_pseudonym ON messages(pseudonym);`,
   );
@@ -65,6 +68,25 @@ export function ensureSchema(sql: SqlStorage): void {
     `INSERT INTO room_state (k, v) VALUES ('schema_version', ?)
      ON CONFLICT(k) DO UPDATE SET v = excluded.v`,
     String(SCHEMA_VERSION),
+  );
+}
+
+/**
+ * VRIP-11 on a table that already exists in production. `CREATE TABLE IF NOT
+ * EXISTS` above only describes a fresh object, so the live room needs the
+ * column added and its history told the truth: every deletion that happened
+ * before this shipped was a moderator's, because withdrawal did not exist. The
+ * backfill runs once, inside the same branch as the ALTER.
+ */
+function addDeletedBy(sql: SqlStorage): void {
+  const columns = sql
+    .exec<{ name: string }>(`PRAGMA table_info(messages)`)
+    .toArray();
+  if (columns.some((column) => column.name === "deleted_by")) return;
+
+  sql.exec(`ALTER TABLE messages ADD COLUMN deleted_by TEXT`);
+  sql.exec(
+    `UPDATE messages SET deleted_by = 'moderator' WHERE deleted_at IS NOT NULL`,
   );
 }
 
@@ -142,7 +164,7 @@ export function recentMessages(
 ): { messages: Msg[]; hasMore: boolean } {
   const rows = sql
     .exec<MessageRow>(
-      `SELECT seq, id, pseudonym, body, created_at, deleted_at FROM messages
+      `SELECT seq, id, pseudonym, body, created_at, deleted_at, deleted_by FROM messages
        WHERE deleted_at IS NULL ORDER BY seq DESC LIMIT ?`,
       limit + 1,
     )
@@ -159,7 +181,7 @@ export function messagesBefore(
 ): { messages: Msg[]; hasMore: boolean } {
   const rows = sql
     .exec<MessageRow>(
-      `SELECT seq, id, pseudonym, body, created_at, deleted_at FROM messages
+      `SELECT seq, id, pseudonym, body, created_at, deleted_at, deleted_by FROM messages
        WHERE seq < ? AND deleted_at IS NULL ORDER BY seq DESC LIMIT ?`,
       before,
       limit + 1,
@@ -172,24 +194,49 @@ export function messagesBefore(
 export function findMessage(sql: SqlStorage, id: string): Msg | null {
   const rows = sql
     .exec<MessageRow>(
-      `SELECT seq, id, pseudonym, body, created_at, deleted_at FROM messages WHERE id = ?`,
+      `SELECT seq, id, pseudonym, body, created_at, deleted_at, deleted_by FROM messages WHERE id = ?`,
       id,
     )
     .toArray();
   return rows.length ? toMsg(rows[0]) : null;
 }
 
-/** Soft delete. Returns false when the id is unknown or already deleted. */
+/**
+ * Soft delete, never a hard one: the row survives so a moderator can still read
+ * what was said. Returns false when nothing changed — an unknown id, or a
+ * deletion this call cannot make more true than it already is.
+ *
+ * The two actors are not symmetric (VRIP-11). A moderator deleting a message
+ * the author already withdrew still records the moderator action, because the
+ * row is the only place that fact lives inside the object; an author
+ * withdrawing a message a moderator already removed changes nothing, or the
+ * record would start describing a moderator's deletion as the author's.
+ *
+ * `deleted_at` is preserved by the moderator branch on purpose: it is when the
+ * message left the room, which the withdrawal decided. When the moderator
+ * acted is in the Neon audit row.
+ */
 export function softDeleteMessage(
   sql: SqlStorage,
   id: string,
   at: number,
+  by: DeletedBy,
 ): boolean {
-  sql.exec(
-    `UPDATE messages SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL`,
-    at,
-    id,
-  );
+  if (by === "moderator") {
+    sql.exec(
+      `UPDATE messages SET deleted_at = COALESCE(deleted_at, ?), deleted_by = 'moderator'
+       WHERE id = ? AND COALESCE(deleted_by, '') <> 'moderator'`,
+      at,
+      id,
+    );
+  } else {
+    sql.exec(
+      `UPDATE messages SET deleted_at = ?, deleted_by = 'author'
+       WHERE id = ? AND deleted_at IS NULL`,
+      at,
+      id,
+    );
+  }
   return sql.exec<{ n: number }>(`SELECT changes() AS n`).one().n === 1;
 }
 

@@ -9,7 +9,7 @@ import {
   sendTo,
   socketsFor,
 } from "./room-broadcast";
-import { handleHistory, handleSend } from "./room-frames";
+import { handleHistory, handleSend, handleWithdraw } from "./room-frames";
 import {
   CLOSE,
   PAGE_SIZE,
@@ -149,6 +149,13 @@ export class RoomDurableObject extends DurableObject<Env> {
       return;
     }
 
+    // `attachment.p` is the authorisation input for every branch below, and it
+    // is the only handle in this method. Nothing reads a handle off the frame.
+    if (frame.t === "withdraw") {
+      handleWithdraw(this.ctx, this.sql, this.env, ws, attachment.p, frame.id);
+      return;
+    }
+
     handleSend(
       this.ctx,
       this.sql,
@@ -235,9 +242,15 @@ export class RoomDurableObject extends DurableObject<Env> {
     db.removeSuspension(this.sql, pseudonym);
   }
 
+  /**
+   * A moderator's deletion, reached only through the console and the script
+   * (VRIP-08). It is recorded as the moderator's even when the author withdrew
+   * the message first, so the row never reads as though nobody but the author
+   * acted on it.
+   */
   async deleteMessage(id: string): Promise<{ ok: boolean }> {
-    const ok = db.softDeleteMessage(this.sql, id, Date.now());
-    if (ok) broadcast(this.ctx, { t: "deleted", id });
+    const ok = db.softDeleteMessage(this.sql, id, Date.now(), "moderator");
+    if (ok) broadcast(this.ctx, { t: "deleted", id, by: "moderator" });
     return { ok };
   }
 

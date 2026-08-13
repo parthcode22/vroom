@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
+import { deletionActor } from "~/lib/room-client";
 import {
   EPHEMERAL_TTL_MS,
   MAX_PAGE_SIZE,
@@ -12,7 +13,7 @@ import {
 } from "../../workers/protocol";
 
 describe("client frames", () => {
-  it("accepts the two documented frames", () => {
+  it("accepts the three documented frames", () => {
     expect(parseClientFrame('{"t":"send","body":"hello"}')).toEqual({
       t: "send",
       body: "hello",
@@ -31,6 +32,21 @@ describe("client frames", () => {
       before: 40,
       limit: 25,
     });
+    expect(parseClientFrame('{"t":"withdraw","id":"m1"}')).toEqual({
+      t: "withdraw",
+      id: "m1",
+    });
+  });
+
+  it("carries no handle off a withdraw frame, whatever the client puts there", () => {
+    // The room authorises on the socket's attachment (VRIP-11). Dropping the
+    // field at the parser means there is no handle in scope downstream to be
+    // read by mistake.
+    const spoofed = parseClientFrame(
+      '{"t":"withdraw","id":"m1","who":"quiet-ibex","pseudonym":"quiet-ibex","p":"quiet-ibex"}',
+    );
+    expect(spoofed).toEqual({ t: "withdraw", id: "m1" });
+    expect(Object.keys(spoofed ?? {})).toEqual(["t", "id"]);
   });
 
   it("rejects anything else rather than half-parsing it", () => {
@@ -41,6 +57,8 @@ describe("client frames", () => {
     expect(parseClientFrame('{"t":"send","body":42}')).toBeNull();
     expect(parseClientFrame('{"t":"history"}')).toBeNull();
     expect(parseClientFrame('{"t":"delete","id":"x"}')).toBeNull();
+    expect(parseClientFrame('{"t":"withdraw"}')).toBeNull();
+    expect(parseClientFrame('{"t":"withdraw","id":7}')).toBeNull();
   });
 });
 
@@ -75,6 +93,37 @@ function sources(dir: string, out: string[] = []): string[] {
   }
   return out;
 }
+
+describe("who a deletion is credited to (VRIP-11)", () => {
+  it("credits the author only when the frame says so", () => {
+    expect(deletionActor("author")).toBe("author");
+    expect(deletionActor("moderator")).toBe("moderator");
+    // A frame from before VRIP-11 carried no actor. Reading it as the author's
+    // would relabel every moderator removal in flight during a deploy.
+    expect(deletionActor(undefined)).toBe("moderator");
+    expect(deletionActor("Author")).toBe("moderator");
+  });
+});
+
+describe("withdrawal is never offered for an unstored message (VRIP-11)", () => {
+  // A source scan for the same reason the TTL check below is one: this project
+  // has no DOM harness, and "which row type renders the control" is a property
+  // of the source rather than of any single render.
+  it("puts the control in the stored row and nowhere else", () => {
+    const rendering = sources("app").filter((file) =>
+      />\s*withdraw\s*</.test(readFileSync(`${ROOT}/${file}`, "utf-8")),
+    );
+    expect(rendering).toEqual(["app/components/room/MessageRow.tsx"]);
+
+    // The row that renders a message which was never written down does not
+    // mention withdrawal at all: there is no row behind it to withdraw.
+    const ephemeral = readFileSync(
+      `${ROOT}/app/components/room/EphemeralRow.tsx`,
+      "utf-8",
+    );
+    expect(/withdraw/i.test(ephemeral)).toBe(false);
+  });
+});
 
 describe("the ephemeral TTL (VRIP-10)", () => {
   it("is sixty seconds", () => {

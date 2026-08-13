@@ -36,10 +36,23 @@ export const EPHEMERAL_TTL_MS = 60_000;
 
 export type SystemTone = "join" | "warn" | "dead";
 
+/**
+ * Who took a message out of the room (VRIP-11). Two deletions now exist and any
+ * surface showing one has to be honest about which it is showing, so the actor
+ * travels with the frame rather than being inferred at the far end.
+ */
+export type DeletedBy = "author" | "moderator";
+
 export type ClientFrame =
   /** `confirmed` records that the sender saw VRIP-09's dialog and went ahead. */
   | { t: "send"; body: string; confirmed?: boolean }
-  | { t: "history"; before: number; limit?: number };
+  | { t: "history"; before: number; limit?: number }
+  /**
+   * An author withdrawing their own message (VRIP-11). It carries the message
+   * id and nothing else: the handle comes from the socket's attachment inside
+   * the room object, so there is no field here for a client to lie in.
+   */
+  | { t: "withdraw"; id: string };
 
 export type ServerFrame =
   | {
@@ -55,7 +68,7 @@ export type ServerFrame =
   | { t: "message"; m: Msg }
   /** Delivered live, never stored, removed by the client after the TTL. */
   | { t: "ephemeral"; m: EphemeralMsg }
-  | { t: "deleted"; id: string }
+  | { t: "deleted"; id: string; by: DeletedBy }
   | { t: "presence"; count: number; members: string[] }
   | { t: "room"; killed: boolean; at: number }
   | { t: "system"; tone: SystemTone; text: string }
@@ -69,6 +82,7 @@ export type SocketErrorCode =
   | "empty"
   | "suspended"
   | "blocked"
+  | "not_author"
   | "bad_frame";
 
 /** Close codes are part of the contract (VRIP-07). */
@@ -111,6 +125,12 @@ export function parseClientFrame(raw: string): ClientFrame | null {
   if (frame.t === "history" && typeof frame.before === "number") {
     const limit = typeof frame.limit === "number" ? frame.limit : undefined;
     return { t: "history", before: frame.before, limit };
+  }
+  // Only the id is read across. Any handle a client attaches to this frame is
+  // dropped here rather than being carried into the room object to be ignored
+  // there (VRIP-11).
+  if (frame.t === "withdraw" && typeof frame.id === "string") {
+    return { t: "withdraw", id: frame.id };
   }
   return null;
 }

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, data } from "react-router";
+import { data } from "react-router";
 
 import type { Route } from "./+types/room";
 import { Composer } from "~/components/room/Composer";
@@ -8,6 +8,7 @@ import { MemberRail } from "~/components/room/MemberRail";
 import { MemberSheet } from "~/components/room/MemberSheet";
 import { MessageList } from "~/components/room/MessageList";
 import { RoomRail } from "~/components/room/RoomRail";
+import { TopBar } from "~/components/room/TopBar";
 import { ensurePseudonym } from "~/lib/membership.server";
 import { requireSession } from "~/lib/require-role.server";
 import {
@@ -18,9 +19,9 @@ import {
   type LogEntry,
 } from "~/lib/room-client";
 import { ROOMS, isRoomId } from "~/lib/rooms";
-import { cn } from "~/lib/utils";
 import {
   EPHEMERAL_TTL_MS,
+  type DeletedBy,
   type EphemeralMsg,
   type Msg,
   type SystemTone,
@@ -49,6 +50,8 @@ export async function loader({ request, params }: Route.LoaderArgs) {
 }
 
 const EMPTY: ReadonlySet<string> = new Set();
+/** Which messages have left the room, and by whose hand (VRIP-11). */
+const NONE_DELETED: ReadonlyMap<string, DeletedBy> = new Map();
 
 function toEntry(msg: Msg): LogEntry {
   return { kind: "msg", key: `m-${msg.id}`, msg };
@@ -79,7 +82,8 @@ function RoomView({
   const [hasMore, setHasMore] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [blocked, setBlocked] = useState<ReadonlySet<string>>(EMPTY);
-  const [deleted, setDeleted] = useState<ReadonlySet<string>>(EMPTY);
+  const [deleted, setDeleted] =
+    useState<ReadonlyMap<string, DeletedBy>>(NONE_DELETED);
   const [reported, setReported] = useState<ReadonlySet<string>>(EMPTY);
   const [sheetOpen, setSheetOpen] = useState(false);
 
@@ -138,7 +142,7 @@ function RoomView({
         setKilled(ready.killed);
         setHasMore(ready.hasMore);
         setLoadingMore(false);
-        setDeleted(EMPTY);
+        setDeleted(NONE_DELETED);
         // The log is replaced wholesale, so any pending removals are moot. The
         // messages they pointed at were never stored and do not come back.
         for (const timer of expiries.current.values()) clearTimeout(timer);
@@ -173,8 +177,8 @@ function RoomView({
         expire(msg);
       },
 
-      onDeleted(id) {
-        setDeleted((prev) => new Set(prev).add(id));
+      onDeleted(id, by) {
+        setDeleted((prev) => new Map(prev).set(id, by));
       },
 
       onPresence(count, list) {
@@ -287,6 +291,20 @@ function RoomView({
     if (!connection.current?.requestHistory(oldestSeq)) setLoadingMore(false);
   }, [hasMore, loadingMore, oldestSeq]);
 
+  // No optimistic removal: the room broadcasts the withdrawal back to this
+  // socket like any other, so the row changes when the room agrees it has.
+  const handleWithdraw = useCallback(
+    (msg: Msg) => {
+      const sent = connection.current?.withdraw(msg.id) ?? false;
+      if (!sent)
+        pushSystem(
+          "warn",
+          "Not connected, so that was not withdrawn. Try again shortly.",
+        );
+    },
+    [pushSystem],
+  );
+
   const handleSend = useCallback(
     (body: string, confirmed: boolean) => {
       const sent = connection.current?.send(body, confirmed) ?? false;
@@ -310,54 +328,15 @@ function RoomView({
     });
   }, [members, pseudonym]);
 
-  const pill = (
-    <>
-      <span className={cn("mark", killed && "mark-dead")} />
-      {online} online
-    </>
-  );
-
   return (
     <div className="app">
-      <header className="topbar">
-        <div className="wordmark">
-          <i />V ROOMS <small>voss labs</small>
-        </div>
-
-        <nav className="tabs" aria-label="View">
-          <Link to={`/room/${room.id}`} className="tab" aria-current="page">
-            {room.name}
-          </Link>
-          {loaderData.isModerator ? (
-            <Link to="/mod" className="tab">
-              Moderation
-            </Link>
-          ) : null}
-        </nav>
-
-        <div className="ml-auto flex items-center gap-[9px]">
-          <span
-            className={cn(
-              "tag [@media(max-width:1040px)]:hidden",
-              killed ? "tag-dead" : "tag-live",
-            )}
-          >
-            {pill}
-          </span>
-          <button
-            type="button"
-            className={cn(
-              "tag hidden min-h-11 [@media(max-width:1040px)]:inline-flex",
-              killed ? "tag-dead" : "tag-live",
-            )}
-            aria-haspopup="dialog"
-            aria-label={`${online} online. Open the rooms and the member list.`}
-            onClick={() => setSheetOpen(true)}
-          >
-            {pill}
-          </button>
-        </div>
-      </header>
+      <TopBar
+        room={room}
+        online={online}
+        killed={killed}
+        isModerator={loaderData.isModerator}
+        onOpenMembers={() => setSheetOpen(true)}
+      />
 
       <div className="room">
         <RoomRail
@@ -388,6 +367,7 @@ function RoomView({
             onBackfill={handleBackfill}
             onReport={handleReport}
             onBlock={handleBlock}
+            onWithdraw={handleWithdraw}
             room={room}
           />
 

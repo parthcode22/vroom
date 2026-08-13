@@ -1,6 +1,6 @@
 import { useLayoutEffect, useRef, useState } from "react";
 
-import type { Msg } from "../../../workers/protocol";
+import type { DeletedBy, Msg } from "../../../workers/protocol";
 import type { LogEntry } from "~/lib/room-client";
 import type { RoomMeta } from "~/lib/rooms";
 import { EphemeralRow } from "./EphemeralRow";
@@ -15,7 +15,8 @@ export interface MessageListProps {
   entries: LogEntry[];
   self: string;
   blocked: ReadonlySet<string>;
-  deleted: ReadonlySet<string>;
+  /** Withdrawn or removed, by id. Absent means the message is still in the room. */
+  deleted: ReadonlyMap<string, DeletedBy>;
   reported: ReadonlySet<string>;
   hasMore: boolean;
   loadingMore: boolean;
@@ -23,6 +24,7 @@ export interface MessageListProps {
   onBackfill: () => void;
   onReport: (msg: Msg) => void;
   onBlock: (who: string) => void;
+  onWithdraw: (msg: Msg) => void;
   room: RoomMeta;
 }
 
@@ -44,6 +46,7 @@ export function MessageList({
   onBackfill,
   onReport,
   onBlock,
+  onWithdraw,
   room,
 }: MessageListProps) {
   const logRef = useRef<HTMLDivElement | null>(null);
@@ -127,10 +130,11 @@ export function MessageList({
                 msg={entry.msg}
                 self={self}
                 blocked={blocked.has(entry.msg.who)}
-                deleted={deleted.has(entry.msg.id)}
+                deleted={deleted.get(entry.msg.id) ?? null}
                 reported={reported.has(entry.msg.id)}
                 onReport={onReport}
                 onBlock={onBlock}
+                onWithdraw={onWithdraw}
               />
             );
           }

@@ -61,6 +61,68 @@ export function handleHistory(
   });
 }
 
+/**
+ * An author withdrawing their own message (VRIP-11).
+ *
+ * `pseudonym` is the socket's own, read from its attachment by the caller. The
+ * frame's only field is the message id, so there is nothing here that a client
+ * could substitute for the handle the room already knows.
+ *
+ * The kill switch gates this the same way it gates sending. A closed room is a
+ * moderator responding to something, and that is the one moment where letting
+ * everyone empty their own history would work directly against them.
+ *
+ * The budget is spent before the row is read, so probing ids for someone else's
+ * message costs the same as speaking.
+ */
+export function handleWithdraw(
+  ctx: DurableObjectState,
+  sql: SqlStorage,
+  env: Env,
+  ws: WebSocket,
+  pseudonym: string,
+  id: string,
+): void {
+  if (db.isSuspended(sql, pseudonym)) {
+    closeQuietly(ws, CLOSE.SUSPENDED, "suspended");
+    return;
+  }
+  if (db.readRoomState(sql).killed) {
+    fail(ws, "room_closed", "The room is closed.");
+    return;
+  }
+
+  const now = Date.now();
+  const limit = numberVar(env.RATE_LIMIT_MESSAGES_PER_MINUTE, 20);
+  const verdict = db.checkRate(sql, pseudonym, limit, now);
+  if (!verdict.allowed) {
+    fail(
+      ws,
+      "rate_limited",
+      "You are sending too quickly.",
+      verdict.retryAfter,
+    );
+    return;
+  }
+
+  const message = db.findMessage(sql, id);
+  // Nothing to withdraw: an unknown id, or an ephemeral message that was never
+  // written down (VRIP-10). Neither is an error worth a refusal frame, and
+  // neither tells the sender anything about a message that is not theirs.
+  if (!message) return;
+
+  if (message.who !== pseudonym) {
+    fail(ws, "not_author", "You can only withdraw your own messages.");
+    return;
+  }
+
+  // Idempotent: an already-withdrawn message changes nothing and broadcasts
+  // nothing, so a double click cannot produce two frames.
+  if (db.softDeleteMessage(sql, id, now, "author")) {
+    broadcast(ctx, { t: "deleted", id, by: "author" });
+  }
+}
+
 export function handleSend(
   ctx: DurableObjectState,
   sql: SqlStorage,
