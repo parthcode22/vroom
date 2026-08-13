@@ -1,10 +1,18 @@
 import { DurableObject } from "cloudflare:workers";
 
-import { numberVar } from "./env";
+import * as policy from "./policy-store";
+import {
+  broadcast,
+  closeQuietly,
+  fail,
+  members,
+  sendTo,
+  socketsFor,
+} from "./room-broadcast";
+import { handleHistory, handleSend } from "./room-frames";
 import {
   CLOSE,
   PAGE_SIZE,
-  clampLimit,
   isSocketAttachment,
   parseClientFrame,
   type Msg,
@@ -34,6 +42,7 @@ export class RoomDurableObject extends DurableObject<Env> {
     this.sql = ctx.storage.sql;
     ctx.blockConcurrencyWhile(async () => {
       db.ensureSchema(this.sql);
+      policy.ensurePolicySchema(this.sql);
     });
   }
 
@@ -82,25 +91,26 @@ export class RoomDurableObject extends DurableObject<Env> {
   private onJoin(server: WebSocket, pseudonym: string, room: string): void {
     const state = db.readRoomState(this.sql);
     const page = db.recentMessages(this.sql, PAGE_SIZE);
-    const members = this.members();
+    const roster = members(this.ctx);
     const now = Date.now();
-    db.recordPeak(this.sql, db.utcDay(now), members.length);
+    db.recordPeak(this.sql, db.utcDay(now), roster.length);
 
-    this.sendTo(server, {
+    sendTo(server, {
       t: "ready",
       pseudonym,
       room,
       killed: state.killed,
-      count: members.length,
-      members,
+      count: roster.length,
+      members: roster,
       messages: page.messages,
       hasMore: page.hasMore,
     });
 
     // A second tab is the same student, so it is not a new arrival.
-    const isFirstSocket = this.socketsFor(pseudonym).length === 1;
+    const isFirstSocket = socketsFor(this.ctx, pseudonym).length === 1;
     if (isFirstSocket) {
-      this.broadcast(
+      broadcast(
+        this.ctx,
         { t: "system", tone: "join", text: `${pseudonym} joined` },
         server,
       );
@@ -113,11 +123,7 @@ export class RoomDurableObject extends DurableObject<Env> {
     message: string | ArrayBuffer,
   ): Promise<void> {
     if (typeof message !== "string") {
-      this.sendTo(ws, {
-        t: "error",
-        code: "bad_frame",
-        message: "Binary frames are not accepted.",
-      });
+      fail(ws, "bad_frame", "Binary frames are not accepted.");
       return;
     }
     const attachment = ws.deserializeAttachment();
@@ -127,122 +133,31 @@ export class RoomDurableObject extends DurableObject<Env> {
     }
     const frame = parseClientFrame(message);
     if (!frame) {
-      this.sendTo(ws, {
-        t: "error",
-        code: "bad_frame",
-        message: "Unrecognised frame.",
-      });
+      fail(ws, "bad_frame", "Unrecognised frame.");
       return;
     }
 
     if (frame.t === "history") {
-      this.handleHistory(ws, attachment.p, frame.before, frame.limit);
+      handleHistory(
+        this.sql,
+        this.env,
+        ws,
+        attachment.p,
+        frame.before,
+        frame.limit,
+      );
       return;
     }
 
-    this.handleSend(ws, attachment.p, frame.body);
-  }
-
-  /**
-   * A history frame is a scan plus a serialisation of up to MAX_PAGE_SIZE rows,
-   * so it is the more expensive of the two and the one worth budgeting: the
-   * object is single-threaded, and a client looping history starves message
-   * delivery, presence and the moderator's setKilled RPC for everyone else.
-   *
-   * The budget is a separate key, so backfilling a long scrollback never spends
-   * the budget for speaking. The kill switch is deliberately not a gate here:
-   * a closed room stays readable ("You can read, you cannot post") and the ready
-   * frame already carries a page of history to a killed room.
-   */
-  private handleHistory(
-    ws: WebSocket,
-    pseudonym: string,
-    before: number,
-    limit?: number,
-  ): void {
-    if (db.isSuspended(this.sql, pseudonym)) {
-      this.closeQuietly(ws, CLOSE.SUSPENDED, "suspended");
-      return;
-    }
-
-    const perMinute = numberVar(this.env.RATE_LIMIT_HISTORY_PER_MINUTE, 30);
-    const verdict = db.checkRate(
+    handleSend(
+      this.ctx,
       this.sql,
-      `history:${pseudonym}`,
-      perMinute,
-      Date.now(),
+      this.env,
+      ws,
+      attachment.p,
+      frame.body,
+      frame.confirmed === true,
     );
-    if (!verdict.allowed) {
-      this.sendTo(ws, {
-        t: "error",
-        code: "rate_limited",
-        message: "You are requesting history too quickly.",
-        retryAfter: verdict.retryAfter,
-      });
-      return;
-    }
-
-    const page = db.messagesBefore(this.sql, before, clampLimit(limit));
-    this.sendTo(ws, {
-      t: "history",
-      messages: page.messages,
-      hasMore: page.hasMore,
-    });
-  }
-
-  private handleSend(ws: WebSocket, pseudonym: string, raw: string): void {
-    if (db.isSuspended(this.sql, pseudonym)) {
-      this.closeQuietly(ws, CLOSE.SUSPENDED, "suspended");
-      return;
-    }
-    if (db.readRoomState(this.sql).killed) {
-      this.sendTo(ws, {
-        t: "error",
-        code: "room_closed",
-        message: "The room is closed.",
-      });
-      return;
-    }
-
-    const body = raw.trim();
-    if (!body) {
-      this.sendTo(ws, {
-        t: "error",
-        code: "empty",
-        message: "Nothing to send.",
-      });
-      return;
-    }
-    const maxChars = numberVar(this.env.MESSAGE_MAX_CHARS, 500);
-    if (body.length > maxChars) {
-      this.sendTo(ws, {
-        t: "error",
-        code: "too_long",
-        message: `Messages are limited to ${maxChars} characters.`,
-      });
-      return;
-    }
-
-    const now = Date.now();
-    const limit = numberVar(this.env.RATE_LIMIT_MESSAGES_PER_MINUTE, 20);
-    const verdict = db.checkRate(this.sql, pseudonym, limit, now);
-    if (!verdict.allowed) {
-      this.sendTo(ws, {
-        t: "error",
-        code: "rate_limited",
-        message: "You are sending too quickly.",
-        retryAfter: verdict.retryAfter,
-      });
-      return;
-    }
-
-    const msg = db.insertMessage(this.sql, {
-      id: crypto.randomUUID(),
-      pseudonym,
-      body,
-      createdAt: now,
-    });
-    this.broadcast({ t: "message", m: msg });
   }
 
   async webSocketClose(
@@ -257,8 +172,9 @@ export class RoomDurableObject extends DurableObject<Env> {
     const attachment = ws.deserializeAttachment();
     const pseudonym = isSocketAttachment(attachment) ? attachment.p : null;
     // The socket is still listed until this handler returns, so exclude it.
-    if (pseudonym && this.socketsFor(pseudonym, ws).length === 0) {
-      this.broadcast(
+    if (pseudonym && socketsFor(this.ctx, pseudonym, ws).length === 0) {
+      broadcast(
+        this.ctx,
         { t: "system", tone: "join", text: `${pseudonym} left` },
         ws,
       );
@@ -272,60 +188,17 @@ export class RoomDurableObject extends DurableObject<Env> {
 
   /* ---------------- presence ---------------- */
 
-  /** Derived, never stored. Two tabs are one student. */
-  private members(exclude?: WebSocket): string[] {
-    const seen = new Set<string>();
-    for (const ws of this.ctx.getWebSockets()) {
-      if (ws === exclude) continue;
-      const attachment = ws.deserializeAttachment();
-      if (isSocketAttachment(attachment)) seen.add(attachment.p);
-    }
-    return [...seen].sort();
-  }
-
-  private socketsFor(pseudonym: string, exclude?: WebSocket): WebSocket[] {
-    return this.ctx.getWebSockets().filter((ws) => {
-      if (ws === exclude) return false;
-      const attachment = ws.deserializeAttachment();
-      return isSocketAttachment(attachment) && attachment.p === pseudonym;
-    });
-  }
-
   private broadcastPresence(exclude?: WebSocket): void {
-    const members = this.members(exclude);
-    this.broadcast({ t: "presence", count: members.length, members }, exclude);
-  }
-
-  private closeQuietly(ws: WebSocket, code: number, reason: string): void {
-    try {
-      ws.close(code, reason);
-    } catch {
-      // Already closing. A second close is not a new fact.
-    }
-  }
-
-  private sendTo(ws: WebSocket, frame: ServerFrame): void {
-    try {
-      ws.send(JSON.stringify(frame));
-    } catch {
-      // A socket the edge has already dropped. Presence corrects on the next close.
-    }
-  }
-
-  private broadcast(frame: ServerFrame, exclude?: WebSocket): void {
-    const payload = JSON.stringify(frame);
-    for (const ws of this.ctx.getWebSockets()) {
-      if (ws === exclude) continue;
-      try {
-        ws.send(payload);
-      } catch {
-        // See sendTo.
-      }
-    }
+    const roster = members(this.ctx, exclude);
+    broadcast(
+      this.ctx,
+      { t: "presence", count: roster.length, members: roster },
+      exclude,
+    );
   }
 
   private system(tone: SystemTone, text: string): void {
-    this.broadcast({ t: "system", tone, text });
+    broadcast(this.ctx, { t: "system", tone, text });
   }
 
   /* ---------------- RPC, called by moderation.server.ts ---------------- */
@@ -340,7 +213,7 @@ export class RoomDurableObject extends DurableObject<Env> {
   ): Promise<{ killed: boolean; at: number }> {
     const at = Date.now();
     db.writeRoomState(this.sql, killed, actor, at);
-    this.broadcast({ t: "room", killed, at });
+    broadcast(this.ctx, { t: "room", killed, at });
     this.system(
       killed ? "dead" : "join",
       killed
@@ -352,8 +225,8 @@ export class RoomDurableObject extends DurableObject<Env> {
 
   async suspend(pseudonym: string): Promise<void> {
     db.addSuspension(this.sql, pseudonym, Date.now());
-    for (const ws of this.socketsFor(pseudonym)) {
-      this.closeQuietly(ws, CLOSE.SUSPENDED, "suspended");
+    for (const ws of socketsFor(this.ctx, pseudonym)) {
+      closeQuietly(ws, CLOSE.SUSPENDED, "suspended");
     }
     this.broadcastPresence();
   }
@@ -364,7 +237,7 @@ export class RoomDurableObject extends DurableObject<Env> {
 
   async deleteMessage(id: string): Promise<{ ok: boolean }> {
     const ok = db.softDeleteMessage(this.sql, id, Date.now());
-    if (ok) this.broadcast({ t: "deleted", id });
+    if (ok) broadcast(this.ctx, { t: "deleted", id });
     return { ok };
   }
 
@@ -374,15 +247,15 @@ export class RoomDurableObject extends DurableObject<Env> {
 
   async stats(): Promise<RoomStats> {
     const { total, since } = db.messageStats(this.sql);
-    const members = this.members();
-    const online = members.length;
+    const present = members(this.ctx);
+    const online = present.length;
     const day = db.utcDay(Date.now());
     return {
       total,
       since,
       peakToday: Math.max(db.readPeak(this.sql, day), online),
       online,
-      members,
+      members: present,
     };
   }
 
@@ -392,6 +265,26 @@ export class RoomDurableObject extends DurableObject<Env> {
 
   async suspendedCount(): Promise<number> {
     return db.countSuspensions(this.sql);
+  }
+
+  /**
+   * VRIP-09's flag drain, called by the console loader. `drainFlags` is a pure
+   * read and `ackFlags` is the only thing that moves the cursor, so a console
+   * that fails between the two sees the same flags again rather than dropping
+   * them — and the report insert is keyed on the flag id, so seeing them twice
+   * cannot produce two reports.
+   */
+  async drainFlags(limit = policy.FLAG_DRAIN_LIMIT): Promise<policy.FlagRow[]> {
+    return policy.drainFlags(this.sql, limit);
+  }
+
+  async ackFlags(throughId: number): Promise<void> {
+    policy.ackFlags(this.sql, throughId);
+  }
+
+  /** Per-handle policy volume. The count tier produces nothing else. */
+  async policyTallies(): Promise<Record<string, Record<string, number>>> {
+    return policy.policyTallies(this.sql);
   }
 
   /**

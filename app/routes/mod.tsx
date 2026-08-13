@@ -20,6 +20,7 @@ import {
   type ModFields,
 } from "~/lib/moderation.server";
 import { isSameOrigin } from "~/lib/origin.server";
+import { drainPolicyFlags } from "~/lib/policy.server";
 import { ModerationError, requireModerator } from "~/lib/require-role.server";
 import { readRooms } from "~/lib/room.server";
 
@@ -61,6 +62,13 @@ function pageParam(request: Request): number {
 export async function loader({ request }: Route.LoaderArgs) {
   await requireModerator(request);
   const page = pageParam(request);
+
+  // VRIP-09's bridge, awaited before the queue is read so a message the room
+  // refused an hour ago is in this load rather than the next one. The result is
+  // deliberately not rendered: an auto-flag surfaces as an ordinary report row,
+  // and an unreachable object is already logged by `tryRoom` rather than being
+  // one more number on a page read under time pressure.
+  await drainPolicyFlags();
 
   // The live numbers are Durable Object reads across every room and degrade to
   // null. The queue is a Neon read and renders either way — a room that cannot

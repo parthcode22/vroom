@@ -9,18 +9,36 @@ export const PROTOCOL_ID = "v-rooms.v1";
 export const PAGE_SIZE = 50;
 export const MAX_PAGE_SIZE = 100;
 
-export interface Msg {
+/**
+ * A message that was broadcast but never written to the store (VRIP-10). It has
+ * no `seq` because `seq` is the store's own primary key, which is exactly what
+ * makes this type safe: every frame that can come out of the message table is
+ * typed `Msg`, so backfill and history cannot carry one of these by accident.
+ */
+export interface EphemeralMsg {
   id: string;
-  seq: number;
   who: string;
   body: string;
   at: number;
 }
 
+export interface Msg extends EphemeralMsg {
+  seq: number;
+}
+
+/**
+ * How long a client shows an unstored message before removing it (VRIP-10).
+ * Defined once, here, because this module is the one both the Durable Object
+ * and the browser import. Sixty rather than thirty: thirty is not long enough
+ * to actually save a number somebody deliberately gave you.
+ */
+export const EPHEMERAL_TTL_MS = 60_000;
+
 export type SystemTone = "join" | "warn" | "dead";
 
 export type ClientFrame =
-  | { t: "send"; body: string }
+  /** `confirmed` records that the sender saw VRIP-09's dialog and went ahead. */
+  | { t: "send"; body: string; confirmed?: boolean }
   | { t: "history"; before: number; limit?: number };
 
 export type ServerFrame =
@@ -35,6 +53,8 @@ export type ServerFrame =
       hasMore: boolean;
     }
   | { t: "message"; m: Msg }
+  /** Delivered live, never stored, removed by the client after the TTL. */
+  | { t: "ephemeral"; m: EphemeralMsg }
   | { t: "deleted"; id: string }
   | { t: "presence"; count: number; members: string[] }
   | { t: "room"; killed: boolean; at: number }
@@ -48,6 +68,7 @@ export type SocketErrorCode =
   | "too_long"
   | "empty"
   | "suspended"
+  | "blocked"
   | "bad_frame";
 
 /** Close codes are part of the contract (VRIP-07). */
@@ -85,7 +106,7 @@ export function parseClientFrame(raw: string): ClientFrame | null {
   const frame = parsed as Record<string, unknown>;
 
   if (frame.t === "send" && typeof frame.body === "string") {
-    return { t: "send", body: frame.body };
+    return { t: "send", body: frame.body, confirmed: frame.confirmed === true };
   }
   if (frame.t === "history" && typeof frame.before === "number") {
     const limit = typeof frame.limit === "number" ? frame.limit : undefined;

@@ -3,6 +3,7 @@ import { useLayoutEffect, useRef, useState } from "react";
 import type { Msg } from "../../../workers/protocol";
 import type { LogEntry } from "~/lib/room-client";
 import type { RoomMeta } from "~/lib/rooms";
+import { EphemeralRow } from "./EphemeralRow";
 import { MessageRow } from "./MessageRow";
 import { SystemLine } from "./SystemLine";
 
@@ -98,7 +99,8 @@ export function MessageList({
     setAtBottom(true);
   }
 
-  const hasMessages = entries.some((entry) => entry.kind === "msg");
+  // An ephemeral message counts: the room is not empty while one is on screen.
+  const hasMessages = entries.some((entry) => entry.kind !== "system");
 
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">
@@ -117,26 +119,37 @@ export function MessageList({
           <div className="sys">this is the beginning of {room.name}</div>
         ) : null}
 
-        {entries.map((entry) =>
-          entry.kind === "msg" && entry.msg ? (
-            <MessageRow
-              key={entry.key}
-              msg={entry.msg}
-              self={self}
-              blocked={blocked.has(entry.msg.who)}
-              deleted={deleted.has(entry.msg.id)}
-              reported={reported.has(entry.msg.id)}
-              onReport={onReport}
-              onBlock={onBlock}
-            />
-          ) : (
-            <SystemLine
-              key={entry.key}
-              tone={entry.tone}
-              text={entry.text ?? ""}
-            />
-          ),
-        )}
+        {entries.map((entry) => {
+          if (entry.kind === "msg") {
+            return (
+              <MessageRow
+                key={entry.key}
+                msg={entry.msg}
+                self={self}
+                blocked={blocked.has(entry.msg.who)}
+                deleted={deleted.has(entry.msg.id)}
+                reported={reported.has(entry.msg.id)}
+                onReport={onReport}
+                onBlock={onBlock}
+              />
+            );
+          }
+          if (entry.kind === "temp") {
+            return (
+              <EphemeralRow
+                key={entry.key}
+                msg={entry.msg}
+                expiresAt={entry.expiresAt}
+                self={self}
+                blocked={blocked.has(entry.msg.who)}
+                onBlock={onBlock}
+              />
+            );
+          }
+          return (
+            <SystemLine key={entry.key} tone={entry.tone} text={entry.text} />
+          );
+        })}
 
         {joining && !hasMessages ? (
           <div className="empty">joining {room.name}</div>

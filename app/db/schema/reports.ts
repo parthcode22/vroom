@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import {
   pgTable,
   text,
@@ -5,6 +6,7 @@ import {
   uuid,
   index,
   unique,
+  uniqueIndex,
 } from "drizzle-orm/pg-core";
 
 import { members } from "./members";
@@ -28,9 +30,10 @@ export const reports = pgTable(
     reportedMemberId: uuid("reported_member_id")
       .notNull()
       .references(() => members.id, { onDelete: "cascade" }),
-    reporterMemberId: uuid("reporter_member_id")
-      .notNull()
-      .references(() => members.id, { onDelete: "cascade" }),
+    // Null for an auto-flag. See the note above.
+    reporterMemberId: uuid("reporter_member_id").references(() => members.id, {
+      onDelete: "cascade",
+    }),
     messageSnapshot: text("message_snapshot").notNull(),
     reason: text("reason"),
     // open | resolved | dismissed
@@ -46,6 +49,11 @@ export const reports = pgTable(
   (t) => [
     // One student cannot inflate the queue by reporting the same message twice.
     unique("reports_message_reporter_uniq").on(t.messageId, t.reporterMemberId),
+    // Postgres treats NULLs as distinct, so the constraint above cannot dedupe
+    // auto-flags. This one can: the message id encodes the flag id.
+    uniqueIndex("reports_auto_flag_uniq")
+      .on(t.roomId, t.messageId)
+      .where(sql`reporter_member_id is null`),
     index("reports_status_created_idx").on(t.status, t.createdAt),
   ],
 );

@@ -19,7 +19,12 @@ import {
 } from "~/lib/room-client";
 import { ROOMS, isRoomId } from "~/lib/rooms";
 import { cn } from "~/lib/utils";
-import type { Msg, SystemTone } from "../../workers/protocol";
+import {
+  EPHEMERAL_TTL_MS,
+  type EphemeralMsg,
+  type Msg,
+  type SystemTone,
+} from "../../workers/protocol";
 
 export function meta({ loaderData }: Route.MetaArgs) {
   if (!loaderData) return [{ title: "V Rooms" }];
@@ -47,6 +52,11 @@ const EMPTY: ReadonlySet<string> = new Set();
 
 function toEntry(msg: Msg): LogEntry {
   return { kind: "msg", key: `m-${msg.id}`, msg };
+}
+
+/** Distinct from a stored message's key, so the two can never collide. */
+function tempKey(id: string): string {
+  return `t-${id}`;
 }
 
 /** Keyed on the room, so switching rooms remounts with an empty log and a fresh socket. */
@@ -89,6 +99,26 @@ function RoomView({
   const connection = useRef<RoomConnection | null>(null);
   const blockedRef = useRef<ReadonlySet<string>>(EMPTY);
   const systemSeq = useRef(0);
+  const expiries = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+
+  // Presentation only. A client that skipped this timer would gain nothing:
+  // the message was never stored, so there is nothing to come back for.
+  const expire = useCallback((msg: EphemeralMsg) => {
+    const key = tempKey(msg.id);
+    const timer = setTimeout(() => {
+      expiries.current.delete(key);
+      setEntries((prev) => prev.filter((entry) => entry.key !== key));
+    }, EPHEMERAL_TTL_MS);
+    expiries.current.set(key, timer);
+  }, []);
+
+  useEffect(() => {
+    const timers = expiries.current;
+    return () => {
+      for (const timer of timers.values()) clearTimeout(timer);
+      timers.clear();
+    };
+  }, []);
 
   const pushSystem = useCallback((tone: SystemTone, text: string) => {
     systemSeq.current += 1;
@@ -109,6 +139,10 @@ function RoomView({
         setHasMore(ready.hasMore);
         setLoadingMore(false);
         setDeleted(EMPTY);
+        // The log is replaced wholesale, so any pending removals are moot. The
+        // messages they pointed at were never stored and do not come back.
+        for (const timer of expiries.current.values()) clearTimeout(timer);
+        expiries.current.clear();
         // The joined line goes last: the page above it is what was said before
         // you arrived, and a backfill prepends further above that.
         setEntries([
@@ -124,6 +158,19 @@ function RoomView({
 
       onMessage(msg) {
         setEntries((prev) => [...prev, toEntry(msg)]);
+      },
+
+      onEphemeral(msg) {
+        setEntries((prev) => [
+          ...prev,
+          {
+            kind: "temp",
+            key: tempKey(msg.id),
+            msg,
+            expiresAt: Date.now() + EPHEMERAL_TTL_MS,
+          },
+        ]);
+        expire(msg);
       },
 
       onDeleted(id) {
@@ -166,7 +213,7 @@ function RoomView({
       socket.stop();
       connection.current = null;
     };
-  }, [pushSystem, room.id]);
+  }, [expire, pushSystem, room.id]);
 
   /* ---------------- blocking, presentation only ---------------- */
 
@@ -226,8 +273,11 @@ function RoomView({
     [pushSystem, room.id],
   );
 
+  // Only the stored arm carries a seq, so an ephemeral message can never become
+  // the paging cursor and ask the room for history "before" something it has
+  // never heard of.
   const oldestSeq = useMemo(() => {
-    for (const entry of entries) if (entry.msg) return entry.msg.seq;
+    for (const entry of entries) if (entry.kind === "msg") return entry.msg.seq;
     return null;
   }, [entries]);
 
@@ -238,8 +288,8 @@ function RoomView({
   }, [hasMore, loadingMore, oldestSeq]);
 
   const handleSend = useCallback(
-    (body: string) => {
-      const sent = connection.current?.send(body) ?? false;
+    (body: string, confirmed: boolean) => {
+      const sent = connection.current?.send(body, confirmed) ?? false;
       if (!sent)
         pushSystem(
           "warn",
