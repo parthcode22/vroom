@@ -43,6 +43,11 @@ Keep a Changelog. Dates are ISO.
   prototype's full re-render
 - Member sheet on narrow viewports, replacing the prototype's hidden rails
 - Test suite: unit tests on Node, Durable Object and upgrade tests in workerd
+- Four more rooms behind `/room/:roomId` — `#placements`, `#electives`,
+  `#hostel`, `#projects` — as a fixed list with one Durable Object each.
+  Suspension and the kill switch now apply to every room, and the room list is
+  reachable from the member sheet on a phone (VRIP-12)
+- VRIP-12: a fixed list of rooms
 
 ### Removed
 - `Dockerfile` and `.dockerignore`, which contradicted VRIP-06's single-Worker

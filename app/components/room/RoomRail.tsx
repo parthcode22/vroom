@@ -1,7 +1,7 @@
-import { cn } from "~/lib/utils";
+import { Link } from "react-router";
 
-/** The four rooms that do not exist yet. Each one is an open GitHub issue. */
-const UNBUILT = ["placements", "electives", "hostel", "projects"] as const;
+import { ROOM_IDS, type RoomId } from "~/lib/rooms";
+import { cn } from "~/lib/utils";
 
 export interface HandlePanelProps {
   pseudonym: string;
@@ -47,43 +47,48 @@ export function HandlePanel({
   );
 }
 
+export interface RoomLinksProps {
+  active: RoomId;
+  onNavigate?: () => void;
+}
+
+/** The room list, in the rail on wide screens and in the sheet on a phone. */
+export function RoomLinks({ active, onNavigate }: RoomLinksProps) {
+  return (
+    <>
+      {ROOM_IDS.map((id) => (
+        <Link
+          key={id}
+          to={`/room/${id}`}
+          className={cn("rail-item", id === active && "active")}
+          aria-current={id === active ? "page" : undefined}
+          onClick={onNavigate}
+        >
+          <span className="rail-hash">#</span> {id}
+        </Link>
+      ))}
+    </>
+  );
+}
+
 export interface RoomRailProps {
   pseudonym: string;
   blockCount: number;
   onClearBlocks: () => void;
+  active: RoomId;
 }
 
 export function RoomRail({
   pseudonym,
   blockCount,
   onClearBlocks,
+  active,
 }: RoomRailProps) {
   return (
     <nav className="rail" aria-label="Rooms">
       <div className="rail-scroll">
         <div className="rail-label">Rooms</div>
-        <button type="button" className="rail-item active" aria-current="true">
-          <span className="rail-hash">#</span> campus-live
-        </button>
-
-        <div className="rail-label">
-          Not built yet <span>{UNBUILT.length}</span>
-        </div>
-        {UNBUILT.map((name) => (
-          <button
-            key={name}
-            type="button"
-            className="rail-item locked"
-            disabled
-          >
-            <span className="rail-hash">#</span> {name}
-            <span className="rail-issue">issue</span>
-          </button>
-        ))}
-
-        <p className="rail-note">
-          Each one is an open issue. Claim it and it ships under your name.
-        </p>
+        <RoomLinks active={active} />
       </div>
 
       <HandlePanel

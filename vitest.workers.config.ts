@@ -17,7 +17,6 @@ export default defineProject({
         compatibilityFlags: ["nodejs_compat"],
         bindings: {
           APP_JWT_SECRET: "test-app-jwt-secret-value-not-a-real-one",
-          ROOM_ID: "campus-live",
           MESSAGE_MAX_CHARS: "500",
           RATE_LIMIT_MESSAGES_PER_MINUTE: "3",
           RATE_LIMIT_HISTORY_PER_MINUTE: "3",

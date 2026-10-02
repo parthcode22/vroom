@@ -2,6 +2,7 @@ import { useLayoutEffect, useRef, useState } from "react";
 
 import type { Msg } from "../../../workers/protocol";
 import type { LogEntry } from "~/lib/room-client";
+import type { RoomMeta } from "~/lib/rooms";
 import { MessageRow } from "./MessageRow";
 import { SystemLine } from "./SystemLine";
 
@@ -21,6 +22,7 @@ export interface MessageListProps {
   onBackfill: () => void;
   onReport: (msg: Msg) => void;
   onBlock: (who: string) => void;
+  room: RoomMeta;
 }
 
 /**
@@ -41,6 +43,7 @@ export function MessageList({
   onBackfill,
   onReport,
   onBlock,
+  room,
 }: MessageListProps) {
   const logRef = useRef<HTMLDivElement | null>(null);
   const [atBottom, setAtBottom] = useState(true);
@@ -104,14 +107,14 @@ export function MessageList({
         className="log"
         role="log"
         aria-live="polite"
-        aria-label="Campus Live messages"
+        aria-label={`${room.name} messages`}
         onScroll={handleScroll}
       >
         {loadingMore ? (
           <div className="sys">loading earlier messages</div>
         ) : null}
         {!loadingMore && !hasMore && hasMessages ? (
-          <div className="sys">this is the beginning of Campus Live</div>
+          <div className="sys">this is the beginning of {room.name}</div>
         ) : null}
 
         {entries.map((entry) =>
@@ -136,16 +139,14 @@ export function MessageList({
         )}
 
         {joining && !hasMessages ? (
-          <div className="empty">joining Campus Live</div>
+          <div className="empty">joining {room.name}</div>
         ) : null}
         {!joining && !hasMessages ? (
           <div className="empty">
             <p className="text-ink-2 m-0">
               Nobody has said anything yet. You could be first.
             </p>
-            <p className="mt-1 mb-0">
-              One room, the whole college, and an empty screen.
-            </p>
+            <p className="mt-1 mb-0">{room.empty}</p>
           </div>
         ) : null}
       </div>

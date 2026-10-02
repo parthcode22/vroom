@@ -14,14 +14,16 @@ import {
 } from "./protocol";
 import * as db from "./room-sql";
 
-/** Header the Worker sets after verifying the token. The binding is the boundary. */
+/** Headers the Worker sets after verifying the token. The binding is the boundary. */
 export const PSEUDONYM_HEADER = "x-vrooms-pseudonym";
+export const ROOM_HEADER = "x-vrooms-room";
 
 export interface RoomStats {
   total: number;
   since: number | null;
   peakToday: number;
   online: number;
+  members: string[];
 }
 
 export class RoomDurableObject extends DurableObject<Env> {
@@ -39,8 +41,9 @@ export class RoomDurableObject extends DurableObject<Env> {
 
   async fetch(request: Request): Promise<Response> {
     const pseudonym = request.headers.get(PSEUDONYM_HEADER);
-    if (!pseudonym) {
-      return new Response("missing pseudonym", { status: 400 });
+    const room = request.headers.get(ROOM_HEADER);
+    if (!pseudonym || !room) {
+      return new Response("missing pseudonym or room", { status: 400 });
     }
     if (request.headers.get("upgrade")?.toLowerCase() !== "websocket") {
       return new Response("expected websocket", { status: 426 });
@@ -63,7 +66,7 @@ export class RoomDurableObject extends DurableObject<Env> {
     this.ctx.acceptWebSocket(server);
     server.serializeAttachment(attachment);
 
-    this.onJoin(server, pseudonym);
+    this.onJoin(server, pseudonym, room);
     return new Response(null, { status: 101, webSocket: client });
   }
 
@@ -76,7 +79,7 @@ export class RoomDurableObject extends DurableObject<Env> {
     return new Response(null, { status: 101, webSocket: client });
   }
 
-  private onJoin(server: WebSocket, pseudonym: string): void {
+  private onJoin(server: WebSocket, pseudonym: string, room: string): void {
     const state = db.readRoomState(this.sql);
     const page = db.recentMessages(this.sql, PAGE_SIZE);
     const members = this.members();
@@ -86,7 +89,7 @@ export class RoomDurableObject extends DurableObject<Env> {
     this.sendTo(server, {
       t: "ready",
       pseudonym,
-      room: this.env.ROOM_ID ?? "campus-live",
+      room,
       killed: state.killed,
       count: members.length,
       members,
@@ -371,13 +374,15 @@ export class RoomDurableObject extends DurableObject<Env> {
 
   async stats(): Promise<RoomStats> {
     const { total, since } = db.messageStats(this.sql);
-    const online = this.members().length;
+    const members = this.members();
+    const online = members.length;
     const day = db.utcDay(Date.now());
     return {
       total,
       since,
       peakToday: Math.max(db.readPeak(this.sql, day), online),
       online,
+      members,
     };
   }
 

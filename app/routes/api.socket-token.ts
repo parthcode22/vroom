@@ -9,13 +9,13 @@ import {
 } from "~/lib/membership.server";
 import { mintAppToken } from "~/lib/app-token.server";
 import { isSameOrigin } from "~/lib/origin.server";
-import { roomId } from "~/lib/room.server";
 import { socketUrl } from "~/lib/room-client";
+import { isRoomId } from "~/lib/rooms";
 
 /**
- * Mints the app token. Same-origin and session required, pseudonym assigned on
- * first call, and a suspended member is refused so they cannot even obtain a
- * token (VRIP-07).
+ * Mints the app token for one room. Same-origin and session required,
+ * pseudonym assigned on first call, and a suspended member is refused so they
+ * cannot even obtain a token (VRIP-07).
  */
 
 function fail(code: string, message: string, status: number) {
@@ -30,6 +30,15 @@ export async function action({ request }: ActionFunctionArgs) {
 
   const user = await getSessionUser(request);
   if (!user) return fail("unauthenticated", "Sign in to join the room.", 401);
+
+  let body: { roomId?: unknown };
+  try {
+    body = (await request.json()) as typeof body;
+  } catch {
+    return fail("bad_request", "Expected a JSON body.", 400);
+  }
+  const room = body.roomId;
+  if (!isRoomId(room)) return fail("unknown_room", "No such room.", 400);
 
   const member = await ensureMember(user.id);
   if (isSuspended(member)) {
@@ -55,7 +64,6 @@ export async function action({ request }: ActionFunctionArgs) {
   if (!pseudonym)
     return fail("pseudonym_unavailable", "Could not assign a handle.", 503);
 
-  const room = roomId();
   const expiresIn = Number(process.env.APP_JWT_TTL_SECONDS) || 900;
   const token = await mintAppToken({ pseudonym, room }, expiresIn);
 

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link } from "react-router";
+import { Link, data } from "react-router";
 
 import type { Route } from "./+types/room";
 import { Composer } from "~/components/room/Composer";
@@ -10,7 +10,6 @@ import { MessageList } from "~/components/room/MessageList";
 import { RoomRail } from "~/components/room/RoomRail";
 import { ensurePseudonym } from "~/lib/membership.server";
 import { requireSession } from "~/lib/require-role.server";
-import { roomId } from "~/lib/room.server";
 import {
   loadBlocked,
   RoomConnection,
@@ -18,24 +17,29 @@ import {
   type ConnectionState as SocketState,
   type LogEntry,
 } from "~/lib/room-client";
+import { ROOMS, isRoomId } from "~/lib/rooms";
 import { cn } from "~/lib/utils";
 import type { Msg, SystemTone } from "../../workers/protocol";
 
-export function meta(_: Route.MetaArgs) {
+export function meta({ loaderData }: Route.MetaArgs) {
+  if (!loaderData) return [{ title: "V Rooms" }];
   return [
-    { title: "Campus Live - V Rooms" },
-    { name: "description", content: "One room, the whole college." },
+    { title: `${loaderData.room.name} - V Rooms` },
+    { name: "description", content: loaderData.room.subtitle },
   ];
 }
 
-export async function loader({ request }: Route.LoaderArgs) {
+export async function loader({ request, params }: Route.LoaderArgs) {
   const actor = await requireSession(request);
+  if (!isRoomId(params.roomId)) {
+    throw data("No such room.", { status: 404 });
+  }
   const member = await ensurePseudonym(actor.member);
 
   return {
     pseudonym: member.pseudonym ?? "",
     isModerator: actor.member.isModerator,
-    room: roomId(),
+    room: ROOMS[params.roomId],
   };
 }
 
@@ -45,7 +49,17 @@ function toEntry(msg: Msg): LogEntry {
   return { kind: "msg", key: `m-${msg.id}`, msg };
 }
 
+/** Keyed on the room, so switching rooms remounts with an empty log and a fresh socket. */
 export default function RoomRoute({ loaderData }: Route.ComponentProps) {
+  return <RoomView key={loaderData.room.id} loaderData={loaderData} />;
+}
+
+function RoomView({
+  loaderData,
+}: {
+  loaderData: Route.ComponentProps["loaderData"];
+}) {
+  const room = loaderData.room;
   const [entries, setEntries] = useState<LogEntry[]>([]);
   const [pseudonym, setPseudonym] = useState(loaderData.pseudonym);
   const [status, setStatus] = useState<SocketState>("connecting");
@@ -85,7 +99,7 @@ export default function RoomRoute({ loaderData }: Route.ComponentProps) {
   /* ---------------- the socket ---------------- */
 
   useEffect(() => {
-    const socket = new RoomConnection({
+    const socket = new RoomConnection(room.id, {
       onState: setStatus,
 
       onReady(ready) {
@@ -152,7 +166,7 @@ export default function RoomRoute({ loaderData }: Route.ComponentProps) {
       socket.stop();
       connection.current = null;
     };
-  }, [pushSystem]);
+  }, [pushSystem, room.id]);
 
   /* ---------------- blocking, presentation only ---------------- */
 
@@ -190,7 +204,7 @@ export default function RoomRoute({ loaderData }: Route.ComponentProps) {
           method: "POST",
           credentials: "same-origin",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ messageId: msg.id }),
+          body: JSON.stringify({ messageId: msg.id, roomId: room.id }),
         });
         if (!response.ok) throw new Error(`report ${response.status}`);
         pushSystem(
@@ -209,7 +223,7 @@ export default function RoomRoute({ loaderData }: Route.ComponentProps) {
         );
       }
     },
-    [pushSystem],
+    [pushSystem, room.id],
   );
 
   const oldestSeq = useMemo(() => {
@@ -261,8 +275,8 @@ export default function RoomRoute({ loaderData }: Route.ComponentProps) {
         </div>
 
         <nav className="tabs" aria-label="View">
-          <Link to="/room" className="tab" aria-current="page">
-            Campus Live
+          <Link to={`/room/${room.id}`} className="tab" aria-current="page">
+            {room.name}
           </Link>
           {loaderData.isModerator ? (
             <Link to="/mod" className="tab">
@@ -287,7 +301,7 @@ export default function RoomRoute({ loaderData }: Route.ComponentProps) {
               killed ? "tag-dead" : "tag-live",
             )}
             aria-haspopup="dialog"
-            aria-label={`${online} online. Open the member list.`}
+            aria-label={`${online} online. Open the rooms and the member list.`}
             onClick={() => setSheetOpen(true)}
           >
             {pill}
@@ -300,12 +314,13 @@ export default function RoomRoute({ loaderData }: Route.ComponentProps) {
           pseudonym={pseudonym}
           blockCount={blocked.size}
           onClearBlocks={handleClearBlocks}
+          active={room.id}
         />
 
         <main className="chat">
           <div className="chat-head">
-            <span className="chat-title">#campus-live</span>
-            <span className="chat-sub">one room, the whole college</span>
+            <span className="chat-title">#{room.id}</span>
+            <span className="chat-sub">{room.subtitle}</span>
             <span className="chat-state" aria-live="polite">
               <ConnectionState state={status} killed={killed} />
             </span>
@@ -323,12 +338,14 @@ export default function RoomRoute({ loaderData }: Route.ComponentProps) {
             onBackfill={handleBackfill}
             onReport={handleReport}
             onBlock={handleBlock}
+            room={room}
           />
 
           <Composer
             killed={killed}
             connected={status === "open"}
             onSend={handleSend}
+            room={room}
           />
         </main>
 
@@ -338,6 +355,7 @@ export default function RoomRoute({ loaderData }: Route.ComponentProps) {
       <MemberSheet
         open={sheetOpen}
         onClose={() => setSheetOpen(false)}
+        active={room.id}
         members={roster}
         self={pseudonym}
         blockCount={blocked.size}

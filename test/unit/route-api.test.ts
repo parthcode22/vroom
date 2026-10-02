@@ -22,6 +22,7 @@ const writeAudit = vi.fn();
 const resolveIdentity = vi.fn();
 
 let roomReachable = true;
+let roomsAsked: string[] = [];
 const roomStub = {
   getMessage: (...a: unknown[]) => getMessage(...a),
   checkScriptAuth: (...a: unknown[]) => checkScriptAuth(...a),
@@ -54,16 +55,26 @@ vi.mock("~/lib/identity.server", () => ({
   resolveIdentity: (...a: unknown[]) => resolveIdentity(...a),
 }));
 vi.mock("~/lib/room.server", () => ({
-  roomId: () => "campus-live",
   RoomUnreachable: class RoomUnreachable extends Error {},
-  getRoom: async () => roomStub,
-  tryRoom: async (fn: (room: typeof roomStub) => Promise<unknown>) =>
-    roomReachable ? fn(roomStub) : null,
+  getRoom: async (id: string) => {
+    roomsAsked.push(id);
+    return roomStub;
+  },
+  tryRoom: async (
+    id: string,
+    fn: (room: typeof roomStub) => Promise<unknown>,
+  ) => {
+    roomsAsked.push(id);
+    return roomReachable ? fn(roomStub) : null;
+  },
 }));
 
 const { action: report } = await import("~/routes/api.report");
 const { action: socketToken } = await import("~/routes/api.socket-token");
 const { action: modApi } = await import("~/routes/api.mod.$action");
+const { ROOM_IDS } = await import("~/lib/rooms");
+
+const REPORT = { messageId: "msg1", roomId: "campus-live" };
 
 type Args = Parameters<typeof report>[0];
 
@@ -112,6 +123,8 @@ async function payload(response: Response) {
 beforeEach(() => {
   vi.clearAllMocks();
   roomReachable = true;
+  roomsAsked = [];
+  process.env.APP_JWT_SECRET = "test-app-jwt-secret-value-not-a-real-one";
   getSessionUser.mockResolvedValue({ id: "u1" });
   ensureMember.mockResolvedValue(member());
   countRecentReportsBy.mockResolvedValue(0);
@@ -133,7 +146,7 @@ beforeEach(() => {
 
 describe("POST /api/report", () => {
   it("files a report for a member in good standing", async () => {
-    const response = await report(json("/api/report", { messageId: "msg1" }));
+    const response = await report(json("/api/report", REPORT));
     expect(response.status).toBe(200);
     expect((await payload(response)).data).toMatchObject({
       ok: true,
@@ -144,7 +157,7 @@ describe("POST /api/report", () => {
 
   it("refuses a suspended reporter", async () => {
     ensureMember.mockResolvedValue(member({ suspendedAt: new Date() }));
-    const response = await report(json("/api/report", { messageId: "msg1" }));
+    const response = await report(json("/api/report", REPORT));
 
     expect(response.status).toBe(403);
     expect((await payload(response)).error?.code).toBe("suspended");
@@ -155,14 +168,14 @@ describe("POST /api/report", () => {
 
   it("refuses a tombstoned reporter through the same check", async () => {
     ensureMember.mockResolvedValue(member({ deletedAt: new Date() }));
-    const response = await report(json("/api/report", { messageId: "msg1" }));
+    const response = await report(json("/api/report", REPORT));
     expect(response.status).toBe(403);
     expect(createReport).not.toHaveBeenCalled();
   });
 
   it("stops a flood at the budget, before it reaches the object or the queue", async () => {
     countRecentReportsBy.mockResolvedValue(10);
-    const response = await report(json("/api/report", { messageId: "msg1" }));
+    const response = await report(json("/api/report", REPORT));
 
     expect(response.status).toBe(429);
     expect((await payload(response)).error?.code).toBe("rate_limited");
@@ -171,7 +184,7 @@ describe("POST /api/report", () => {
   });
 
   it("counts the budget per member over a bounded window", async () => {
-    await report(json("/api/report", { messageId: "msg1" }));
+    await report(json("/api/report", REPORT));
     const [memberId, since] = countRecentReportsBy.mock.calls[0] as [
       string,
       Date,
@@ -185,11 +198,7 @@ describe("POST /api/report", () => {
 
   it("refuses a cross-origin post before it touches the session", async () => {
     const response = await report(
-      json(
-        "/api/report",
-        { messageId: "msg1" },
-        { "sec-fetch-site": "cross-site" },
-      ),
+      json("/api/report", REPORT, { "sec-fetch-site": "cross-site" }),
     );
     expect(response.status).toBe(403);
     expect((await payload(response)).error?.code).toBe("cross_origin");
@@ -198,15 +207,38 @@ describe("POST /api/report", () => {
 
   it("still refuses an unauthenticated same-origin post", async () => {
     getSessionUser.mockResolvedValue(null);
-    const response = await report(json("/api/report", { messageId: "msg1" }));
+    const response = await report(json("/api/report", REPORT));
     expect(response.status).toBe(401);
   });
 
   it("will not let anyone report their own message", async () => {
     findMemberByPseudonym.mockResolvedValue(member({ id: "m1" }));
-    const response = await report(json("/api/report", { messageId: "msg1" }));
+    const response = await report(json("/api/report", REPORT));
     expect(response.status).toBe(400);
     expect(createReport).not.toHaveBeenCalled();
+  });
+
+  it("refuses a report that names no room, or a room this deployment does not serve", async () => {
+    for (const body of [
+      { messageId: "msg1" },
+      { messageId: "msg1", roomId: "somewhere-else" },
+    ]) {
+      const response = await report(json("/api/report", body));
+      expect(response.status).toBe(400);
+    }
+    expect(getMessage).not.toHaveBeenCalled();
+    expect(createReport).not.toHaveBeenCalled();
+  });
+
+  it("reads the message back from the room the report names, and records it", async () => {
+    const response = await report(
+      json("/api/report", { messageId: "msg1", roomId: "hostel" }),
+    );
+    expect(response.status).toBe(200);
+    expect(roomsAsked).toEqual(["hostel"]);
+    expect(createReport).toHaveBeenCalledWith(
+      expect.objectContaining({ roomId: "hostel" }),
+    );
   });
 });
 
@@ -222,9 +254,31 @@ describe("POST /api/socket-token", () => {
 
   it("refuses a suspended member a token", async () => {
     ensureMember.mockResolvedValue(member({ suspendedAt: new Date() }));
-    const response = await socketToken(json("/api/socket-token", {}));
+    const response = await socketToken(
+      json("/api/socket-token", { roomId: "campus-live" }),
+    );
     expect(response.status).toBe(403);
     expect((await payload(response)).error?.code).toBe("suspended");
+  });
+
+  it("mints a token for the room asked for, with that room's socket URL", async () => {
+    const response = await socketToken(
+      json("/api/socket-token", { roomId: "hostel" }),
+    );
+    expect(response.status).toBe(200);
+    const { data } = await payload(response);
+    expect(data?.pseudonym).toBe("quiet-ibex");
+    expect(String(data?.wsUrl)).toContain("room=hostel");
+    expect(typeof data?.token).toBe("string");
+  });
+
+  it("refuses a room this deployment does not serve, and a body with none", async () => {
+    for (const body of [{}, { roomId: "somewhere-else" }, { roomId: 7 }]) {
+      const response = await socketToken(json("/api/socket-token", body));
+      expect(response.status).toBe(400);
+      expect((await payload(response)).error?.code).toBe("unknown_room");
+    }
+    expect(ensureMember).not.toHaveBeenCalled();
   });
 });
 
@@ -269,6 +323,7 @@ describe("POST /api/mod/:action", () => {
     expect(response.status).toBe(429);
     expect((await payload(response)).error?.code).toBe("rate_limited");
     expect(checkScriptAuth).toHaveBeenCalledWith(expect.any(Number));
+    expect(roomsAsked).toEqual(["campus-live"]);
   });
 
   it("keeps working when the object cannot be reached, since the token still gates it", async () => {
@@ -338,6 +393,6 @@ describe("POST /api/mod/:action", () => {
     } as unknown as Args);
 
     expect(response.status).toBe(200);
-    expect(setKilled).toHaveBeenCalledOnce();
+    expect(setKilled).toHaveBeenCalledTimes(ROOM_IDS.length);
   });
 });

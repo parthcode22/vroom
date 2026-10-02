@@ -53,7 +53,6 @@ vi.mock("~/lib/identity.server", () => ({
   resolveIdentity: (...a: unknown[]) => resolveIdentity(...a),
 }));
 vi.mock("~/lib/room.server", () => ({
-  roomId: () => "campus-live",
   RoomUnreachable: class RoomUnreachable extends Error {},
   getRoom: async () => ({
     setKilled: (...a: unknown[]) => setKilled(...a),
@@ -62,9 +61,11 @@ vi.mock("~/lib/room.server", () => ({
     deleteMessage: vi.fn(async () => ({ ok: true })),
   }),
   tryRoom: async () => null,
+  readRooms: async () => null,
 }));
 
 const { loader, action } = await import("~/routes/mod");
+const { ROOM_IDS } = await import("~/lib/rooms");
 
 type LoaderArgs = Parameters<typeof loader>[0];
 type ActionArgs = Parameters<typeof action>[0];
@@ -260,7 +261,7 @@ describe("a moderator in good standing", () => {
     const result = await action(
       post({ intent: "set_room_state", killed: "true" }),
     );
-    expect(setKilled).toHaveBeenCalledOnce();
+    expect(setKilled).toHaveBeenCalledTimes(ROOM_IDS.length);
     expect(result.data.data).toMatchObject({
       intent: "set_room_state",
       killed: true,

@@ -21,7 +21,7 @@ import {
 } from "~/lib/moderation.server";
 import { isSameOrigin } from "~/lib/origin.server";
 import { ModerationError, requireModerator } from "~/lib/require-role.server";
-import { tryRoom } from "~/lib/room.server";
+import { readRooms } from "~/lib/room.server";
 
 /**
  * The moderator console (VRIP-05). The navigation entry not rendering for a
@@ -62,30 +62,19 @@ export async function loader({ request }: Route.LoaderArgs) {
   await requireModerator(request);
   const page = pageParam(request);
 
-  // The three live numbers are Durable Object reads and degrade to null. The
-  // queue is a Neon read and renders either way — a room that cannot be reached
-  // is exactly when the reports still need looking at.
-  const [
-    reports,
-    totalReports,
-    accounts,
-    audit,
-    openReports,
-    suspended,
-    stats,
-    roomState,
-    counts,
-  ] = await Promise.all([
-    listReports(page),
-    countReports(),
-    listAccounts(),
-    listAudit(100),
-    countOpenReports(),
-    countSuspended(),
-    tryRoom((room) => room.stats()),
-    tryRoom((room) => room.getRoomState()),
-    tryRoom((room) => room.countsByPseudonym()),
-  ]);
+  // The live numbers are Durable Object reads across every room and degrade to
+  // null. The queue is a Neon read and renders either way — a room that cannot
+  // be reached is exactly when the reports still need looking at.
+  const [reports, totalReports, accounts, audit, openReports, suspended, live] =
+    await Promise.all([
+      listReports(page),
+      countReports(),
+      listAccounts(),
+      listAudit(100),
+      countOpenReports(),
+      countSuspended(),
+      readRooms(),
+    ]);
 
   // No email leaves this function. `reveal` is a POST and nothing else (VRIP-08).
   return {
@@ -94,9 +83,9 @@ export async function loader({ request }: Route.LoaderArgs) {
     audit,
     openReports,
     suspended,
-    stats,
-    roomState,
-    counts,
+    stats: live ? live.stats : null,
+    roomState: live ? live.roomState : null,
+    counts: live ? live.counts : null,
     page,
     totalReports,
     pageCount: Math.max(1, Math.ceil(totalReports / REPORTS_PAGE_SIZE)),

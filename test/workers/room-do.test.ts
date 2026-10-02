@@ -443,3 +443,30 @@ describe("moderation enforcement", () => {
     watcher.ws.close(CLOSE.NORMAL, "done");
   });
 });
+
+describe("rooms", () => {
+  it("keeps rooms apart: a message in one room never reaches another", async () => {
+    const campus = await connect("quiet-ibex");
+    const { socket: hostel } = await open(
+      await token("polite-okapi", 900, "hostel"),
+      "hostel",
+    );
+    if (!hostel) throw new Error("upgrade failed");
+    const ready = (await hostel.next("ready")) as Extract<
+      ServerFrame,
+      { t: "ready" }
+    >;
+    expect(ready.room).toBe("hostel");
+    expect(ready.members).not.toContain("quiet-ibex");
+
+    clear(campus);
+    clear(hostel);
+    campus.send({ t: "send", body: "only for campus live" });
+    await campus.next("message");
+    await scheduler.wait(50);
+    expect(hostel.frames.some((frame) => frame.t === "message")).toBe(false);
+
+    campus.ws.close(CLOSE.NORMAL, "done");
+    hostel.ws.close(CLOSE.NORMAL, "done");
+  });
+});

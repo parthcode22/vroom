@@ -5,7 +5,8 @@ import { ensureMember, findMemberByPseudonym } from "~/db/queries/members";
 import { countRecentReportsBy, createReport } from "~/db/queries/reports";
 import { isSuspended } from "~/lib/membership.server";
 import { isSameOrigin } from "~/lib/origin.server";
-import { roomId, tryRoom } from "~/lib/room.server";
+import { tryRoom } from "~/lib/room.server";
+import { isRoomId } from "~/lib/rooms";
 
 /**
  * Filing a report.
@@ -56,20 +57,23 @@ export async function action({ request }: ActionFunctionArgs) {
     );
   }
 
-  let body: { messageId?: unknown; reason?: unknown };
+  let body: { messageId?: unknown; reason?: unknown; roomId?: unknown };
   try {
     body = (await request.json()) as typeof body;
   } catch {
     return fail("bad_request", "Expected a JSON body.", 400);
   }
 
+  const room = body.roomId;
+  if (!isRoomId(room)) return fail("bad_request", "roomId is required.", 400);
+
   const messageId = typeof body.messageId === "string" ? body.messageId : null;
   if (!messageId) return fail("bad_request", "messageId is required.", 400);
 
   // Wrapped in an object so "the object is unreachable" stays distinguishable
   // from "the object says there is no such message".
-  const lookup = await tryRoom(async (room) => ({
-    message: await room.getMessage(messageId),
+  const lookup = await tryRoom(room, async (stub) => ({
+    message: await stub.getMessage(messageId),
   }));
   if (!lookup)
     return fail(
@@ -89,7 +93,7 @@ export async function action({ request }: ActionFunctionArgs) {
   }
 
   const created = await createReport({
-    roomId: roomId(),
+    roomId: room,
     messageId: message.id,
     reportedMemberId: reported.id,
     reporterMemberId: reporter.id,
