@@ -2,7 +2,7 @@ import { type RouteConfig, index, route } from "@react-router/dev/routes";
 
 export default [
   index("routes/home.tsx"),
-  route("room", "routes/room-redirect.tsx"),
+  route("room", "routes/room.index.tsx"),
   route("room/:roomId", "routes/room.tsx"),
   // Not rendered for a student, and every action re-checks the role server-side.
   route("mod", "routes/mod.tsx"),

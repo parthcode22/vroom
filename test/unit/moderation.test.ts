@@ -26,13 +26,17 @@ vi.mock("~/lib/identity.server", () => ({
   resolveIdentity: (...a: unknown[]) => resolveIdentity(...a),
 }));
 vi.mock("~/lib/room.server", () => ({
-  getRoom: () => getRoom(),
+  getRoom: (id: string) => getRoom(id),
   RoomUnreachable: class RoomUnreachable extends Error {},
 }));
 
 const { performModeration, MOD_INTENTS, isModIntent } =
   await import("~/lib/moderation.server");
 const { ModerationError } = await import("~/lib/require-role.server");
+const { ROOM_IDS } = await import("~/lib/rooms");
+
+/** One enforcement call per room: suspension and the kill switch fan out (VRIP-12). */
+const EVERY_ROOM = ROOM_IDS.map(() => "do");
 
 function member(overrides: Partial<MemberRecord> = {}): MemberRecord {
   return {
@@ -76,6 +80,7 @@ beforeEach(() => {
   getRoom.mockResolvedValue(room());
   findReport.mockResolvedValue({
     id: "r1",
+    roomId: "campus-live",
     messageId: "msg1",
     snapshot: "text",
     reason: null,
@@ -182,11 +187,14 @@ describe("role enforcement", () => {
 });
 
 describe("ordering: enforcement first, record second", () => {
-  it("suspends in the object before writing Neon and the audit row", async () => {
+  it("suspends in every room before writing Neon and the audit row", async () => {
     await performModeration({ member: member(), kind: "console" }, "suspend", {
       memberId: "m2",
     });
-    expect(order).toEqual(["do", "neon", "audit"]);
+    expect(order).toEqual([...EVERY_ROOM, "neon", "audit"]);
+    expect(getRoom.mock.calls.map((call) => call[0]).sort()).toEqual(
+      [...ROOM_IDS].sort(),
+    );
   });
 
   it("also resolves the report when the suspension came from one", async () => {
@@ -195,25 +203,72 @@ describe("ordering: enforcement first, record second", () => {
       "suspend",
       FIELDS,
     );
-    expect(order).toEqual(["do", "neon", "neon", "audit"]);
+    expect(order).toEqual([...EVERY_ROOM, "neon", "neon", "audit"]);
   });
 
-  it("deletes in the object before resolving the report", async () => {
+  it("restores in every room, so a restored handle is not still silenced somewhere", async () => {
+    await performModeration({ member: member(), kind: "console" }, "restore", {
+      memberId: "m2",
+    });
+    expect(order).toEqual([...EVERY_ROOM, "neon", "audit"]);
+    expect(getRoom).toHaveBeenCalledTimes(ROOM_IDS.length);
+  });
+
+  it("deletes in the room the report names, and only there", async () => {
+    findReport.mockResolvedValue({
+      id: "r1",
+      roomId: "hostel",
+      messageId: "msg1",
+      snapshot: "text",
+      reason: null,
+      handle: "grumpy-heron",
+      reportedMemberId: "m2",
+      status: "open",
+      createdAt: new Date(),
+    });
     await performModeration(
       { member: member(), kind: "console" },
       "delete_message",
       FIELDS,
     );
     expect(order).toEqual(["do", "neon", "audit"]);
+    expect(getRoom).toHaveBeenCalledOnce();
+    expect(getRoom).toHaveBeenCalledWith("hostel");
   });
 
-  it("closes the room in the object before recording it", async () => {
+  it("refuses a report naming a room this deployment does not serve", async () => {
+    findReport.mockResolvedValue({
+      id: "r1",
+      roomId: "somewhere-else",
+      messageId: "msg1",
+      snapshot: "text",
+      reason: null,
+      handle: "grumpy-heron",
+      reportedMemberId: "m2",
+      status: "open",
+      createdAt: new Date(),
+    });
+    await expect(
+      performModeration(
+        { member: member(), kind: "console" },
+        "delete_message",
+        FIELDS,
+      ),
+    ).rejects.toMatchObject({ code: "room_unreachable" });
+    expect(order).toEqual([]);
+  });
+
+  it("closes every room before recording it, under one audit row", async () => {
     await performModeration(
       { member: member(), kind: "console" },
       "set_room_state",
       FIELDS,
     );
-    expect(order).toEqual(["do", "audit"]);
+    expect(order).toEqual([...EVERY_ROOM, "audit"]);
+    expect(writeAudit).toHaveBeenCalledOnce();
+    expect(writeAudit).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "room_close", targetId: "all" }),
+    );
   });
 
   it("writes nothing to Neon when the object is unreachable", async () => {
@@ -226,6 +281,22 @@ describe("ordering: enforcement first, record second", () => {
       ),
     ).rejects.toMatchObject({ code: "room_unreachable" });
     expect(order).toEqual([]);
+    expect(setSuspended).not.toHaveBeenCalled();
+    expect(writeAudit).not.toHaveBeenCalled();
+  });
+
+  it("writes nothing to Neon when one room of five is unreachable", async () => {
+    getRoom.mockImplementation(async (id: string) => {
+      if (id === "hostel") throw new Error("no binding");
+      return room();
+    });
+    await expect(
+      performModeration(
+        { member: member(), kind: "console" },
+        "suspend",
+        FIELDS,
+      ),
+    ).rejects.toMatchObject({ code: "room_unreachable" });
     expect(setSuspended).not.toHaveBeenCalled();
     expect(writeAudit).not.toHaveBeenCalled();
   });

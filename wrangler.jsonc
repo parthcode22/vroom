@@ -35,7 +35,6 @@
     "APP_JWT_TTL_SECONDS": "900",
     "RATE_LIMIT_MESSAGES_PER_MINUTE": "20",
     "RATE_LIMIT_HISTORY_PER_MINUTE": "30",
-    "MESSAGE_MAX_CHARS": "500",
-    "ROOM_ID": "campus-live"
+    "MESSAGE_MAX_CHARS": "500"
   }
 }

@@ -53,6 +53,9 @@ export const AUDIT_ACTIONS = [
   "reveal",
   "delete_message",
   "suspend",
+  // Written by the console when it mirrors an auto-suspension the room made on
+  // its own (VRIP-09). The actor is null: no human decided it.
+  "auto_suspend",
   "restore",
   "dismiss_report",
   "room_close",

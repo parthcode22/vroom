@@ -73,6 +73,25 @@ describe("socket upgrade", () => {
     expect((await socket!.closed()).code).toBe(CLOSE.BAD_TOKEN);
   });
 
+  it("accepts a token for another configured room on that room's socket", async () => {
+    const { socket } = await open(
+      await token("quiet-ibex", 900, "hostel"),
+      "hostel",
+    );
+    expect(socket).not.toBeNull();
+    const ready = await socket!.next("ready");
+    expect(ready).toMatchObject({ t: "ready", room: "hostel" });
+    socket!.ws.close(CLOSE.NORMAL, "done");
+  });
+
+  it("closes with 4002 when a hostel token is presented on the placements socket", async () => {
+    const { socket } = await open(
+      await token("quiet-ibex", 900, "hostel"),
+      "placements",
+    );
+    expect((await socket!.closed()).code).toBe(CLOSE.BAD_TOKEN);
+  });
+
   it("rejects a room the deployment does not serve", async () => {
     const response = await upgrade(
       `${PROTOCOL_ID}, ${await token("quiet-ibex")}`,

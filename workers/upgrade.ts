@@ -1,8 +1,8 @@
 import { verifyAppToken } from "~/lib/app-token.server";
-import { isValidRoomId } from "~/lib/rooms";
+import { isRoomId } from "~/lib/rooms";
 
 import { CLOSE, PROTOCOL_ID } from "./protocol";
-import { PSEUDONYM_HEADER } from "./room-do";
+import { PSEUDONYM_HEADER, ROOM_HEADER } from "./room-do";
 
 /**
  * The only trust boundary on the socket.
@@ -57,11 +57,8 @@ export async function handleUpgrade(
     return new Response("Expected a WebSocket upgrade.", { status: 426 });
   }
 
-  const url = new URL(request.url);
-  const room = url.searchParams.get("room");
-  if (!room || !isValidRoomId(room)) {
-    return reject(CLOSE.BAD_TOKEN, "unknown room");
-  }
+  const room = new URL(request.url).searchParams.get("room");
+  if (!isRoomId(room)) return reject(CLOSE.BAD_TOKEN, "unknown room");
 
   const token = readToken(request);
   if (!token) return reject(CLOSE.BAD_TOKEN, "missing token");
@@ -76,6 +73,7 @@ export async function handleUpgrade(
   const stub = env.ROOM.get(env.ROOM.idFromName(room));
   const forwarded = new Request(request);
   forwarded.headers.set(PSEUDONYM_HEADER, verified.claims.pseudonym);
+  forwarded.headers.set(ROOM_HEADER, room);
 
   const response = await stub.fetch(forwarded);
   if (response.status !== 101 || !response.webSocket) return response;

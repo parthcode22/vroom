@@ -6,7 +6,7 @@ import { countRecentReportsBy, createReport } from "~/db/queries/reports";
 import { isSuspended } from "~/lib/membership.server";
 import { isSameOrigin } from "~/lib/origin.server";
 import { tryRoom } from "~/lib/room.server";
-import { isValidRoomId } from "~/lib/rooms";
+import { isRoomId } from "~/lib/rooms";
 
 /**
  * Filing a report.
@@ -64,18 +64,16 @@ export async function action({ request }: ActionFunctionArgs) {
     return fail("bad_request", "Expected a JSON body.", 400);
   }
 
-  const room = typeof body.roomId === "string" ? body.roomId : null;
-  if (!room || !isValidRoomId(room)) {
-    return fail("bad_request", "Invalid or missing room ID.", 400);
-  }
+  const room = body.roomId;
+  if (!isRoomId(room)) return fail("bad_request", "roomId is required.", 400);
 
   const messageId = typeof body.messageId === "string" ? body.messageId : null;
   if (!messageId) return fail("bad_request", "messageId is required.", 400);
 
   // Wrapped in an object so "the object is unreachable" stays distinguishable
   // from "the object says there is no such message".
-  const lookup = await tryRoom(room, async (r) => ({
-    message: await r.getMessage(messageId),
+  const lookup = await tryRoom(room, async (stub) => ({
+    message: await stub.getMessage(messageId),
   }));
   if (!lookup)
     return fail(

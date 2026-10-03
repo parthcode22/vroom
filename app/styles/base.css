@@ -45,6 +45,22 @@
 }
 
 @layer base {
+  .light {
+    --color-ground: #fafafa;
+    --color-panel: #f4f4f5;
+    --color-panel-2: #e4e4e7;
+    --color-raised: #d4d4d8;
+    --color-raised-2: #a1a1aa;
+    --color-line: #e4e4e7;
+    --color-line-2: #d4d4d8;
+    --color-line-3: #a1a1aa;
+
+    --color-ink: #0b0b0a;
+    --color-ink-2: #3f3f46;
+    --color-ink-3: #71717a;
+    color-scheme: light;
+  }
+
   * {
     box-sizing: border-box;
   }

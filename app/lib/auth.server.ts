@@ -4,7 +4,7 @@ import { genericOAuth } from "better-auth/plugins";
 
 import { getDb, schema } from "~/db";
 
-/** harshal.more@vit.edu.in -> "Harshal More" */
+/** first.last@vit.edu.in -> "First Last" */
 function deriveNameFromEmail(email: string): string {
   const local = email?.split("@")[0] ?? "";
   return (

@@ -10,6 +10,7 @@ import {
 import { isBrowserCrossOrigin } from "~/lib/origin.server";
 import { ModerationError } from "~/lib/require-role.server";
 import { tryRoom } from "~/lib/room.server";
+import { DEFAULT_ROOM_ID } from "~/lib/rooms";
 
 /**
  * The script front door (VRIP-08). Same module as the console, so the
@@ -60,10 +61,10 @@ export async function action({ request, params }: ActionFunctionArgs) {
     return fail("cross_origin", "Cross-origin requests are refused.", 403);
   }
 
-  // Throttled in the room object, the only state two isolates share. It fails
-  // open when the object is unreachable: the token check is still the control,
-  // and moderation during an outage matters more than the attempt budget.
-  const attempt = await tryRoom((room) =>
+  // Throttled in the default room's object, the only state two isolates share.
+  // It fails open when the object is unreachable: the token check is still the
+  // control, and moderation during an outage matters more than the budget.
+  const attempt = await tryRoom(DEFAULT_ROOM_ID, (room) =>
     room.checkScriptAuth(SCRIPT_AUTH_ATTEMPTS_PER_MINUTE),
   );
   if (attempt && !attempt.allowed) {

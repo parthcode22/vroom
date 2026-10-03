@@ -1,45 +1,63 @@
-export const ROOMS = {
+/**
+ * The rooms this deployment serves (VRIP-12). A fixed list, not a table: there
+ * is no room creation, and an id that is not here is refused at the upgrade.
+ */
+
+const ROOM_LIST = {
   "campus-live": {
     id: "campus-live",
     name: "Campus Live",
-    subtitle: "one room, the whole college",
+    subtitle: "the whole college, live",
     placeholder: "Say something to the college",
-    emptyStateMessage: "One room, the whole college, and an empty screen.",
+    empty: "The whole college, and an empty screen.",
   },
   placements: {
     id: "placements",
-    name: "placements",
-    subtitle: "career and internship discussions",
+    name: "Placements",
+    subtitle: "companies, rounds, offers",
     placeholder: "Say something in #placements",
-    emptyStateMessage: "Ask your doubts related to the placement cell, training programs, and interview prep.",
+    empty:
+      "What a company asked, which round it was, what the offer looked like.",
   },
   electives: {
     id: "electives",
-    name: "electives",
-    subtitle: "course selection and reviews",
+    name: "Electives",
+    subtitle: "which ones are actually manageable",
     placeholder: "Say something in #electives",
-    emptyStateMessage: "Discuss course selections, share subject reviews, and ask for faculty recommendations.",
+    empty:
+      "Which elective is worth it, which one is a trap, who teaches it well.",
   },
   hostel: {
     id: "hostel",
-    name: "hostel",
-    subtitle: "dorm life and campus housing",
+    name: "Hostel",
+    subtitle: "rooms, rules, roommates",
     placeholder: "Say something in #hostel",
-    emptyStateMessage: "Ask about hostel facilities, dorm life, rules, or find roommates.",
+    empty:
+      "Hostel facilities, hostel rules, and finding someone to share with.",
   },
   projects: {
     id: "projects",
-    name: "projects",
-    subtitle: "collaborate on open source and lab work",
+    name: "Projects",
+    subtitle: "find people to build with",
     placeholder: "Say something in #projects",
-    emptyStateMessage: "Find team members for your academic projects, discuss lab work, or ask technical queries.",
+    empty: "Find teammates, ask about lab work, or show what you built.",
   },
 } as const;
 
-export type RoomId = keyof typeof ROOMS;
+export type RoomId = keyof typeof ROOM_LIST;
 
-export const ROOM_IDS = Object.keys(ROOMS) as RoomId[];
+export interface RoomMeta {
+  id: RoomId;
+  name: string;
+  subtitle: string;
+  placeholder: string;
+  empty: string;
+}
 
-export function isValidRoomId(id: string): id is RoomId {
-  return ROOM_IDS.includes(id as RoomId);
+export const ROOMS: Record<RoomId, RoomMeta> = ROOM_LIST;
+export const ROOM_IDS = Object.keys(ROOM_LIST) as RoomId[];
+export const DEFAULT_ROOM_ID: RoomId = "campus-live";
+
+export function isRoomId(value: unknown): value is RoomId {
+  return typeof value === "string" && (ROOM_IDS as string[]).includes(value);
 }

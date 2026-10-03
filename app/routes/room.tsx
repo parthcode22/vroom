@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, redirect } from "react-router";
+import { data } from "react-router";
 
 import type { Route } from "./+types/room";
 import { Composer } from "~/components/room/Composer";
@@ -8,6 +8,7 @@ import { MemberRail } from "~/components/room/MemberRail";
 import { MemberSheet } from "~/components/room/MemberSheet";
 import { MessageList } from "~/components/room/MessageList";
 import { RoomRail } from "~/components/room/RoomRail";
+import { TopBar } from "~/components/room/TopBar";
 import { ensurePseudonym } from "~/lib/membership.server";
 import { requireSession } from "~/lib/require-role.server";
 import {
@@ -17,42 +18,61 @@ import {
   type ConnectionState as SocketState,
   type LogEntry,
 } from "~/lib/room-client";
-import { ROOMS, isValidRoomId } from "~/lib/rooms";
-import { cn } from "~/lib/utils";
-import type { Msg, SystemTone } from "../../workers/protocol";
+import { ROOMS, isRoomId } from "~/lib/rooms";
+import {
+  EPHEMERAL_TTL_MS,
+  type DeletedBy,
+  type EphemeralMsg,
+  type Msg,
+  type SystemTone,
+} from "../../workers/protocol";
 
-export function meta({ data }: Route.MetaArgs) {
-  if (!data?.roomMeta) return [];
+export function meta({ loaderData }: Route.MetaArgs) {
+  if (!loaderData) return [{ title: "V Rooms" }];
   return [
-    { title: `${data.roomMeta.name} - V Rooms` },
-    { name: "description", content: data.roomMeta.subtitle },
+    { title: `${loaderData.room.name} - V Rooms` },
+    { name: "description", content: loaderData.room.subtitle },
   ];
 }
 
 export async function loader({ request, params }: Route.LoaderArgs) {
-  const roomId = params.roomId;
-  if (!roomId || !isValidRoomId(roomId)) {
-    throw redirect("/room/campus-live");
-  }
-
   const actor = await requireSession(request);
+  if (!isRoomId(params.roomId)) {
+    throw data("No such room.", { status: 404 });
+  }
   const member = await ensurePseudonym(actor.member);
 
   return {
     pseudonym: member.pseudonym ?? "",
     isModerator: actor.member.isModerator,
-    roomId,
-    roomMeta: ROOMS[roomId],
+    room: ROOMS[params.roomId],
   };
 }
 
 const EMPTY: ReadonlySet<string> = new Set();
+/** Which messages have left the room, and by whose hand (VRIP-11). */
+const NONE_DELETED: ReadonlyMap<string, DeletedBy> = new Map();
 
 function toEntry(msg: Msg): LogEntry {
   return { kind: "msg", key: `m-${msg.id}`, msg };
 }
 
+/** Distinct from a stored message's key, so the two can never collide. */
+function tempKey(id: string): string {
+  return `t-${id}`;
+}
+
+/** Keyed on the room, so switching rooms remounts with an empty log and a fresh socket. */
 export default function RoomRoute({ loaderData }: Route.ComponentProps) {
+  return <RoomView key={loaderData.room.id} loaderData={loaderData} />;
+}
+
+function RoomView({
+  loaderData,
+}: {
+  loaderData: Route.ComponentProps["loaderData"];
+}) {
+  const room = loaderData.room;
   const [entries, setEntries] = useState<LogEntry[]>([]);
   const [pseudonym, setPseudonym] = useState(loaderData.pseudonym);
   const [status, setStatus] = useState<SocketState>("connecting");
@@ -62,7 +82,8 @@ export default function RoomRoute({ loaderData }: Route.ComponentProps) {
   const [hasMore, setHasMore] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [blocked, setBlocked] = useState<ReadonlySet<string>>(EMPTY);
-  const [deleted, setDeleted] = useState<ReadonlySet<string>>(EMPTY);
+  const [deleted, setDeleted] =
+    useState<ReadonlyMap<string, DeletedBy>>(NONE_DELETED);
   const [reported, setReported] = useState<ReadonlySet<string>>(EMPTY);
   const [sheetOpen, setSheetOpen] = useState(false);
 
@@ -82,6 +103,26 @@ export default function RoomRoute({ loaderData }: Route.ComponentProps) {
   const connection = useRef<RoomConnection | null>(null);
   const blockedRef = useRef<ReadonlySet<string>>(EMPTY);
   const systemSeq = useRef(0);
+  const expiries = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+
+  // Presentation only. A client that skipped this timer would gain nothing:
+  // the message was never stored, so there is nothing to come back for.
+  const expire = useCallback((msg: EphemeralMsg) => {
+    const key = tempKey(msg.id);
+    const timer = setTimeout(() => {
+      expiries.current.delete(key);
+      setEntries((prev) => prev.filter((entry) => entry.key !== key));
+    }, EPHEMERAL_TTL_MS);
+    expiries.current.set(key, timer);
+  }, []);
+
+  useEffect(() => {
+    const timers = expiries.current;
+    return () => {
+      for (const timer of timers.values()) clearTimeout(timer);
+      timers.clear();
+    };
+  }, []);
 
   const pushSystem = useCallback((tone: SystemTone, text: string) => {
     systemSeq.current += 1;
@@ -92,7 +133,7 @@ export default function RoomRoute({ loaderData }: Route.ComponentProps) {
   /* ---------------- the socket ---------------- */
 
   useEffect(() => {
-    const socket = new RoomConnection(loaderData.roomId, {
+    const socket = new RoomConnection(room.id, {
       onState: setStatus,
 
       onReady(ready) {
@@ -101,7 +142,11 @@ export default function RoomRoute({ loaderData }: Route.ComponentProps) {
         setKilled(ready.killed);
         setHasMore(ready.hasMore);
         setLoadingMore(false);
-        setDeleted(EMPTY);
+        setDeleted(NONE_DELETED);
+        // The log is replaced wholesale, so any pending removals are moot. The
+        // messages they pointed at were never stored and do not come back.
+        for (const timer of expiries.current.values()) clearTimeout(timer);
+        expiries.current.clear();
         // The joined line goes last: the page above it is what was said before
         // you arrived, and a backfill prepends further above that.
         setEntries([
@@ -119,8 +164,21 @@ export default function RoomRoute({ loaderData }: Route.ComponentProps) {
         setEntries((prev) => [...prev, toEntry(msg)]);
       },
 
-      onDeleted(id) {
-        setDeleted((prev) => new Set(prev).add(id));
+      onEphemeral(msg) {
+        setEntries((prev) => [
+          ...prev,
+          {
+            kind: "temp",
+            key: tempKey(msg.id),
+            msg,
+            expiresAt: Date.now() + EPHEMERAL_TTL_MS,
+          },
+        ]);
+        expire(msg);
+      },
+
+      onDeleted(id, by) {
+        setDeleted((prev) => new Map(prev).set(id, by));
       },
 
       onPresence(count, list) {
@@ -159,7 +217,7 @@ export default function RoomRoute({ loaderData }: Route.ComponentProps) {
       socket.stop();
       connection.current = null;
     };
-  }, [pushSystem, loaderData.roomId]);
+  }, [expire, pushSystem, room.id]);
 
   /* ---------------- blocking, presentation only ---------------- */
 
@@ -197,7 +255,7 @@ export default function RoomRoute({ loaderData }: Route.ComponentProps) {
           method: "POST",
           credentials: "same-origin",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ messageId: msg.id, roomId: loaderData.roomId }),
+          body: JSON.stringify({ messageId: msg.id, roomId: room.id }),
         });
         if (!response.ok) throw new Error(`report ${response.status}`);
         pushSystem(
@@ -216,11 +274,14 @@ export default function RoomRoute({ loaderData }: Route.ComponentProps) {
         );
       }
     },
-    [pushSystem],
+    [pushSystem, room.id],
   );
 
+  // Only the stored arm carries a seq, so an ephemeral message can never become
+  // the paging cursor and ask the room for history "before" something it has
+  // never heard of.
   const oldestSeq = useMemo(() => {
-    for (const entry of entries) if (entry.msg) return entry.msg.seq;
+    for (const entry of entries) if (entry.kind === "msg") return entry.msg.seq;
     return null;
   }, [entries]);
 
@@ -230,9 +291,23 @@ export default function RoomRoute({ loaderData }: Route.ComponentProps) {
     if (!connection.current?.requestHistory(oldestSeq)) setLoadingMore(false);
   }, [hasMore, loadingMore, oldestSeq]);
 
+  // No optimistic removal: the room broadcasts the withdrawal back to this
+  // socket like any other, so the row changes when the room agrees it has.
+  const handleWithdraw = useCallback(
+    (msg: Msg) => {
+      const sent = connection.current?.withdraw(msg.id) ?? false;
+      if (!sent)
+        pushSystem(
+          "warn",
+          "Not connected, so that was not withdrawn. Try again shortly.",
+        );
+    },
+    [pushSystem],
+  );
+
   const handleSend = useCallback(
-    (body: string) => {
-      const sent = connection.current?.send(body) ?? false;
+    (body: string, confirmed: boolean) => {
+      const sent = connection.current?.send(body, confirmed) ?? false;
       if (!sent)
         pushSystem(
           "warn",
@@ -253,67 +328,28 @@ export default function RoomRoute({ loaderData }: Route.ComponentProps) {
     });
   }, [members, pseudonym]);
 
-  const pill = (
-    <>
-      <span className={cn("mark", killed && "mark-dead")} />
-      {online} online
-    </>
-  );
-
   return (
     <div className="app">
-      <header className="topbar">
-        <div className="wordmark">
-          <i />V ROOMS <small>voss labs</small>
-        </div>
-
-        <nav className="tabs" aria-label="View">
-          <Link to={`/room/${loaderData.roomId}`} className="tab" aria-current="page">
-            {loaderData.roomMeta.name}
-          </Link>
-          {loaderData.isModerator ? (
-            <Link to="/mod" className="tab">
-              Moderation
-            </Link>
-          ) : null}
-        </nav>
-
-        <div className="ml-auto flex items-center gap-[9px]">
-          <span
-            className={cn(
-              "tag [@media(max-width:1040px)]:hidden",
-              killed ? "tag-dead" : "tag-live",
-            )}
-          >
-            {pill}
-          </span>
-          <button
-            type="button"
-            className={cn(
-              "tag hidden min-h-11 [@media(max-width:1040px)]:inline-flex",
-              killed ? "tag-dead" : "tag-live",
-            )}
-            aria-haspopup="dialog"
-            aria-label={`${online} online. Open the member list.`}
-            onClick={() => setSheetOpen(true)}
-          >
-            {pill}
-          </button>
-        </div>
-      </header>
+      <TopBar
+        room={room}
+        online={online}
+        killed={killed}
+        isModerator={loaderData.isModerator}
+        onOpenMembers={() => setSheetOpen(true)}
+      />
 
       <div className="room">
         <RoomRail
           pseudonym={pseudonym}
           blockCount={blocked.size}
           onClearBlocks={handleClearBlocks}
-          activeRoomId={loaderData.roomId}
+          active={room.id}
         />
 
         <main className="chat">
           <div className="chat-head">
-            <span className="chat-title">#{loaderData.roomMeta.id}</span>
-            <span className="chat-sub">{loaderData.roomMeta.subtitle}</span>
+            <span className="chat-title">#{room.id}</span>
+            <span className="chat-sub">{room.subtitle}</span>
             <span className="chat-state" aria-live="polite">
               <ConnectionState state={status} killed={killed} />
             </span>
@@ -331,16 +367,15 @@ export default function RoomRoute({ loaderData }: Route.ComponentProps) {
             onBackfill={handleBackfill}
             onReport={handleReport}
             onBlock={handleBlock}
-            roomName={loaderData.roomMeta.name}
-            roomSubtitle={loaderData.roomMeta.subtitle}
-            roomEmptyStateMessage={loaderData.roomMeta.emptyStateMessage}
+            onWithdraw={handleWithdraw}
+            room={room}
           />
 
           <Composer
             killed={killed}
             connected={status === "open"}
             onSend={handleSend}
-            placeholder={loaderData.roomMeta.placeholder}
+            room={room}
           />
         </main>
 
@@ -350,6 +385,7 @@ export default function RoomRoute({ loaderData }: Route.ComponentProps) {
       <MemberSheet
         open={sheetOpen}
         onClose={() => setSheetOpen(false)}
+        active={room.id}
         members={roster}
         self={pseudonym}
         blockCount={blocked.size}

@@ -21,6 +21,17 @@ export function Layout({ children }: { children: React.ReactNode }) {
         <meta name="color-scheme" content="dark" />
         {/* A pseudonymous student room has nothing to gain from being indexed. */}
         <meta name="robots" content="noindex" />
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              try {
+                if (localStorage.getItem("theme") === "light") {
+                  document.documentElement.classList.add("light");
+                }
+              } catch (_) {}
+            `,
+          }}
+        />
         <Meta />
         <Links />
       </head>

@@ -4,6 +4,7 @@ import type { Route } from "./+types/mod";
 import { AccountTable } from "~/components/mod/AccountTable";
 import { AuditList } from "~/components/mod/AuditList";
 import { ReportTable } from "~/components/mod/ReportTable";
+import { ThemeToggle } from "~/components/ThemeToggle";
 import { RoomSwitch } from "~/components/mod/RoomSwitch";
 import { StatCards } from "~/components/mod/StatCards";
 import { listAudit } from "~/db/queries/audit";
@@ -20,8 +21,9 @@ import {
   type ModFields,
 } from "~/lib/moderation.server";
 import { isSameOrigin } from "~/lib/origin.server";
+import { drainPolicyFlags } from "~/lib/policy.server";
 import { ModerationError, requireModerator } from "~/lib/require-role.server";
-import { tryRoom } from "~/lib/room.server";
+import { readRooms } from "~/lib/room.server";
 
 /**
  * The moderator console (VRIP-05). The navigation entry not rendering for a
@@ -62,30 +64,26 @@ export async function loader({ request }: Route.LoaderArgs) {
   await requireModerator(request);
   const page = pageParam(request);
 
-  // The three live numbers are Durable Object reads and degrade to null. The
-  // queue is a Neon read and renders either way — a room that cannot be reached
-  // is exactly when the reports still need looking at.
-  const [
-    reports,
-    totalReports,
-    accounts,
-    audit,
-    openReports,
-    suspended,
-    stats,
-    roomState,
-    counts,
-  ] = await Promise.all([
-    listReports(page),
-    countReports(),
-    listAccounts(),
-    listAudit(100),
-    countOpenReports(),
-    countSuspended(),
-    tryRoom("campus-live", (room) => room.stats()),
-    tryRoom("campus-live", (room) => room.getRoomState()),
-    tryRoom("campus-live", (room) => room.countsByPseudonym()),
-  ]);
+  // VRIP-09's bridge, awaited before the queue is read so a message the room
+  // refused an hour ago is in this load rather than the next one. The result is
+  // deliberately not rendered: an auto-flag surfaces as an ordinary report row,
+  // and an unreachable object is already logged by `tryRoom` rather than being
+  // one more number on a page read under time pressure.
+  await drainPolicyFlags();
+
+  // The live numbers are Durable Object reads across every room and degrade to
+  // null. The queue is a Neon read and renders either way — a room that cannot
+  // be reached is exactly when the reports still need looking at.
+  const [reports, totalReports, accounts, audit, openReports, suspended, live] =
+    await Promise.all([
+      listReports(page),
+      countReports(),
+      listAccounts(),
+      listAudit(100),
+      countOpenReports(),
+      countSuspended(),
+      readRooms(),
+    ]);
 
   // No email leaves this function. `reveal` is a POST and nothing else (VRIP-08).
   return {
@@ -94,9 +92,9 @@ export async function loader({ request }: Route.LoaderArgs) {
     audit,
     openReports,
     suspended,
-    stats,
-    roomState,
-    counts,
+    stats: live ? live.stats : null,
+    roomState: live ? live.roomState : null,
+    counts: live ? live.counts : null,
     page,
     totalReports,
     pageCount: Math.max(1, Math.ceil(totalReports / REPORTS_PAGE_SIZE)),
@@ -188,6 +186,7 @@ export default function ModConsole({ loaderData }: Route.ComponentProps) {
         </nav>
 
         <div className="ml-auto flex items-center gap-[9px]">
+          <ThemeToggle />
           <span className={stats ? "tag tag-live" : "tag"}>
             {stats ? (
               <>

@@ -6,8 +6,8 @@ import {
 import { findReport, setReportStatus } from "~/db/queries/reports";
 import { writeAudit } from "~/db/queries/audit";
 import { resolveIdentity } from "~/lib/identity.server";
-import { getRoom, RoomUnreachable } from "~/lib/room.server";
-import { ROOM_IDS } from "~/lib/rooms";
+import { getRoom, RoomUnreachable, type RoomStub } from "~/lib/room.server";
+import { ROOM_IDS, isRoomId, type RoomId } from "~/lib/rooms";
 import { ModerationError, assertModerator } from "~/lib/require-role.server";
 
 /**
@@ -82,9 +82,22 @@ function unreachable(error: unknown): never {
   );
 }
 
-async function room(roomId: string) {
+async function room(roomId: RoomId) {
   try {
     return await getRoom(roomId);
+  } catch (error) {
+    unreachable(error);
+  }
+}
+
+/**
+ * Suspension and the kill switch apply to every room, all or nothing (VRIP-12).
+ * A handle silenced in four rooms and still posting in the fifth is not
+ * suspended, so one unreachable room fails the action before any Neon write.
+ */
+async function everyRoom<T>(fn: (room: RoomStub) => Promise<T>): Promise<T[]> {
+  try {
+    return await Promise.all(ROOM_IDS.map(async (id) => fn(await room(id))));
   } catch (error) {
     unreachable(error);
   }
@@ -163,6 +176,13 @@ async function deleteMessage(
   fields: ModFields,
 ): Promise<ModResult> {
   const report = await requireReport(fields.reportId);
+  if (!isRoomId(report.roomId)) {
+    throw new ModerationError(
+      "room_unreachable",
+      "That report names a room this deployment does not serve.",
+      503,
+    );
+  }
 
   try {
     await (await room(report.roomId)).deleteMessage(report.messageId);
@@ -184,7 +204,8 @@ async function deleteMessage(
 
 async function suspend(actor: ModActor, fields: ModFields): Promise<ModResult> {
   const member = await requireMember(fields.memberId);
-  if (!member.pseudonym) {
+  const handle = member.pseudonym;
+  if (!handle) {
     throw new ModerationError(
       "member_not_found",
       "That account has no handle yet.",
@@ -193,17 +214,7 @@ async function suspend(actor: ModActor, fields: ModFields): Promise<ModResult> {
   }
 
   // Enforcement first: this closes their open sockets with 4003.
-  try {
-    for (const id of ROOM_IDS) {
-      try {
-        await (await room(id)).suspend(member.pseudonym);
-      } catch (e) {
-        // Continue if a room is unreachable, we still want to suspend in others
-      }
-    }
-  } catch (error) {
-    unreachable(error);
-  }
+  await everyRoom((stub) => stub.suspend(handle));
 
   await setSuspended(member.id, true, fields.reason ?? null);
   if (fields.reportId)
@@ -222,7 +233,8 @@ async function suspend(actor: ModActor, fields: ModFields): Promise<ModResult> {
 
 async function restore(actor: ModActor, fields: ModFields): Promise<ModResult> {
   const member = await requireMember(fields.memberId);
-  if (!member.pseudonym) {
+  const handle = member.pseudonym;
+  if (!handle) {
     throw new ModerationError(
       "member_not_found",
       "That account has no handle yet.",
@@ -230,17 +242,7 @@ async function restore(actor: ModActor, fields: ModFields): Promise<ModResult> {
     );
   }
 
-  try {
-    for (const id of ROOM_IDS) {
-      try {
-        await (await room(id)).restore(member.pseudonym);
-      } catch (e) {
-        // Ignore unreachable rooms
-      }
-    }
-  } catch (error) {
-    unreachable(error);
-  }
+  await everyRoom((stub) => stub.restore(handle));
 
   await setSuspended(member.id, false);
   await writeAudit({
@@ -288,14 +290,9 @@ async function setRoomState(
   fields: ModFields,
 ): Promise<ModResult> {
   const killed = fields.killed === true;
-  let result: { killed: boolean; at: number };
-  try {
-    result = await (
-      await room("campus-live")
-    ).setKilled(killed, actor.member.pseudonym ?? actor.member.id);
-  } catch (error) {
-    unreachable(error);
-  }
+  const by = actor.member.pseudonym ?? actor.member.id;
+  const results = await everyRoom((stub) => stub.setKilled(killed, by));
+  const at = Math.max(...results.map((result) => result.at));
 
   // The reason is why this row exists. `npm run mod -- close "<why>"` documents
   // the argument, and the room is closed under more pressure than anything else.
@@ -304,8 +301,8 @@ async function setRoomState(
     actorMemberId: actor.member.id,
     actorKind: actor.kind,
     targetType: "room",
-    targetId: "campus-live",
+    targetId: "all",
     details: fields.reason ? { reason: fields.reason } : null,
   });
-  return { intent: "set_room_state", killed: result.killed, at: result.at };
+  return { intent: "set_room_state", killed, at };
 }

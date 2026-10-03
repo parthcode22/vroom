@@ -46,6 +46,7 @@ function reportRow(id: string, status: string, createdAt: Date): unknown[] {
     null,
     "grumpy-heron",
     "m2",
+    "campus-live",
     status,
     createdAt,
   ];

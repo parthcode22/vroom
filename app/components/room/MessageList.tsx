@@ -1,7 +1,9 @@
 import { useLayoutEffect, useRef, useState } from "react";
 
-import type { Msg } from "../../../workers/protocol";
+import type { DeletedBy, Msg } from "../../../workers/protocol";
 import type { LogEntry } from "~/lib/room-client";
+import type { RoomMeta } from "~/lib/rooms";
+import { EphemeralRow } from "./EphemeralRow";
 import { MessageRow } from "./MessageRow";
 import { SystemLine } from "./SystemLine";
 
@@ -13,7 +15,8 @@ export interface MessageListProps {
   entries: LogEntry[];
   self: string;
   blocked: ReadonlySet<string>;
-  deleted: ReadonlySet<string>;
+  /** Withdrawn or removed, by id. Absent means the message is still in the room. */
+  deleted: ReadonlyMap<string, DeletedBy>;
   reported: ReadonlySet<string>;
   hasMore: boolean;
   loadingMore: boolean;
@@ -21,9 +24,8 @@ export interface MessageListProps {
   onBackfill: () => void;
   onReport: (msg: Msg) => void;
   onBlock: (who: string) => void;
-  roomName: string;
-  roomSubtitle: string;
-  roomEmptyStateMessage: string;
+  onWithdraw: (msg: Msg) => void;
+  room: RoomMeta;
 }
 
 /**
@@ -44,9 +46,8 @@ export function MessageList({
   onBackfill,
   onReport,
   onBlock,
-  roomName,
-  roomSubtitle,
-  roomEmptyStateMessage,
+  onWithdraw,
+  room,
 }: MessageListProps) {
   const logRef = useRef<HTMLDivElement | null>(null);
   const [atBottom, setAtBottom] = useState(true);
@@ -101,7 +102,8 @@ export function MessageList({
     setAtBottom(true);
   }
 
-  const hasMessages = entries.some((entry) => entry.kind === "msg");
+  // An ephemeral message counts: the room is not empty while one is on screen.
+  const hasMessages = entries.some((entry) => entry.kind !== "system");
 
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">
@@ -110,48 +112,58 @@ export function MessageList({
         className="log"
         role="log"
         aria-live="polite"
-        aria-label={`${roomName} messages`}
+        aria-label={`${room.name} messages`}
         onScroll={handleScroll}
       >
         {loadingMore ? (
           <div className="sys">loading earlier messages</div>
         ) : null}
         {!loadingMore && !hasMore && hasMessages ? (
-          <div className="sys">this is the beginning of {roomName}</div>
+          <div className="sys">this is the beginning of {room.name}</div>
         ) : null}
 
-        {entries.map((entry) =>
-          entry.kind === "msg" && entry.msg ? (
-            <MessageRow
-              key={entry.key}
-              msg={entry.msg}
-              self={self}
-              blocked={blocked.has(entry.msg.who)}
-              deleted={deleted.has(entry.msg.id)}
-              reported={reported.has(entry.msg.id)}
-              onReport={onReport}
-              onBlock={onBlock}
-            />
-          ) : (
-            <SystemLine
-              key={entry.key}
-              tone={entry.tone}
-              text={entry.text ?? ""}
-            />
-          ),
-        )}
+        {entries.map((entry) => {
+          if (entry.kind === "msg") {
+            return (
+              <MessageRow
+                key={entry.key}
+                msg={entry.msg}
+                self={self}
+                blocked={blocked.has(entry.msg.who)}
+                deleted={deleted.get(entry.msg.id) ?? null}
+                reported={reported.has(entry.msg.id)}
+                onReport={onReport}
+                onBlock={onBlock}
+                onWithdraw={onWithdraw}
+              />
+            );
+          }
+          if (entry.kind === "temp") {
+            return (
+              <EphemeralRow
+                key={entry.key}
+                msg={entry.msg}
+                expiresAt={entry.expiresAt}
+                self={self}
+                blocked={blocked.has(entry.msg.who)}
+                onBlock={onBlock}
+              />
+            );
+          }
+          return (
+            <SystemLine key={entry.key} tone={entry.tone} text={entry.text} />
+          );
+        })}
 
         {joining && !hasMessages ? (
-          <div className="empty">joining {roomName}</div>
+          <div className="empty">joining {room.name}</div>
         ) : null}
         {!joining && !hasMessages ? (
           <div className="empty">
             <p className="text-ink-2 m-0">
               Nobody has said anything yet. You could be first.
             </p>
-            <p className="mt-1 mb-0">
-              {roomEmptyStateMessage}
-            </p>
+            <p className="mt-1 mb-0">{room.empty}</p>
           </div>
         ) : null}
       </div>
