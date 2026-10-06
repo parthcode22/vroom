@@ -1,11 +1,15 @@
 import type { ActionFunctionArgs } from "react-router";
 
-import { ensureMemberByKey } from "~/db/queries/members";
+import {
+  ensureMemberByKey,
+  findAnyMemberByKeyHash,
+} from "~/db/queries/members";
 import {
   deviceSessionCookie,
   mintDeviceSession,
   verifyDeviceProof,
 } from "~/lib/device-session.server";
+import { allowNewHandle } from "~/lib/handle-brake.server";
 import { isSuspended } from "~/lib/membership.server";
 import { isSameOrigin } from "~/lib/origin.server";
 
@@ -14,7 +18,8 @@ import { isSameOrigin } from "~/lib/origin.server";
  *
  * The proof is verified before any database work, so a forged or replayed-late
  * request costs no Neon round trip. A suspended key is refused here, as the
- * token mint refuses it, so it cannot even obtain a session.
+ * token mint refuses it, so it cannot even obtain a session. A key with no
+ * member row yet is a new handle, and only that passes the edge brake.
  */
 
 function fail(code: string, message: string, status: number) {
@@ -57,7 +62,15 @@ export async function action({ request }: ActionFunctionArgs) {
   let member;
   let token: string;
   try {
-    member = await ensureMemberByKey(proof.keyHash);
+    const existing = await findAnyMemberByKeyHash(proof.keyHash);
+    if (!existing && !(await allowNewHandle(request))) {
+      return fail(
+        "too_many_new_handles",
+        "Too many new handles from this network. Try again in a minute.",
+        429,
+      );
+    }
+    member = existing ?? (await ensureMemberByKey(proof.keyHash));
     if (isSuspended(member))
       return fail("suspended", "This handle is suspended.", 403);
     token = await mintDeviceSession(member.id);

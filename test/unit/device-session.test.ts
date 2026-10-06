@@ -8,17 +8,23 @@ import type { MemberRecord } from "~/db/queries/members";
  */
 
 const ensureMemberByKey = vi.fn();
+const findAnyMemberByKeyHash = vi.fn();
 const ensureMember = vi.fn();
 const findMemberById = vi.fn();
 const getSessionUser = vi.fn();
+const allowNewHandle = vi.fn();
 
 vi.mock("~/db/queries/members", () => ({
   ensureMemberByKey: (...a: unknown[]) => ensureMemberByKey(...a),
+  findAnyMemberByKeyHash: (...a: unknown[]) => findAnyMemberByKeyHash(...a),
   ensureMember: (...a: unknown[]) => ensureMember(...a),
   findMemberById: (...a: unknown[]) => findMemberById(...a),
 }));
 vi.mock("~/lib/auth.server", () => ({
   getSessionUser: (...a: unknown[]) => getSessionUser(...a),
+}));
+vi.mock("~/lib/handle-brake.server", () => ({
+  allowNewHandle: (...a: unknown[]) => allowNewHandle(...a),
 }));
 
 process.env.DEVICE_SESSION_SECRET = "test-device-session-secret";
@@ -98,6 +104,8 @@ function member(overrides: Partial<MemberRecord> = {}): MemberRecord {
 beforeEach(() => {
   vi.clearAllMocks();
   getSessionUser.mockResolvedValue(null);
+  findAnyMemberByKeyHash.mockResolvedValue(null);
+  allowNewHandle.mockResolvedValue(true);
 });
 
 afterEach(() => {
@@ -235,6 +243,30 @@ describe("POST /api/device/session", () => {
     } as never);
     expect(response.status).toBe(403);
     expect(response.headers.get("set-cookie")).toBeNull();
+  });
+
+  it("refuses a new handle over the edge brake, before any insert", async () => {
+    allowNewHandle.mockResolvedValue(false);
+    const body = await prove(await keyPair(), await mintChallenge());
+    const response = await openSession({
+      request: post("/api/device/session", body),
+    } as never);
+    expect(response.status).toBe(429);
+    expect(response.headers.get("set-cookie")).toBeNull();
+    expect(ensureMemberByKey).not.toHaveBeenCalled();
+  });
+
+  it("lets a returning key in without charging the brake", async () => {
+    // A campus behind one NAT address must spend the budget on newcomers only.
+    findAnyMemberByKeyHash.mockResolvedValue(member());
+    allowNewHandle.mockResolvedValue(false);
+    const body = await prove(await keyPair(), await mintChallenge());
+    const response = await openSession({
+      request: post("/api/device/session", body),
+    } as never);
+    expect(response.status).toBe(200);
+    expect(allowNewHandle).not.toHaveBeenCalled();
+    expect(ensureMemberByKey).not.toHaveBeenCalled();
   });
 
   it("answers 503 rather than 500 when the database is down", async () => {

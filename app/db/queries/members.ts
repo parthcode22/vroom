@@ -97,7 +97,7 @@ export async function ensureMember(userId: string): Promise<MemberRecord> {
 }
 
 /** Includes tombstones, for the same reason as findAnyMemberByUserId. */
-async function findAnyMemberByKeyHash(
+export async function findAnyMemberByKeyHash(
   keyHash: string,
 ): Promise<MemberRecord | null> {
   const rows = await db

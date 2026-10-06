@@ -124,12 +124,14 @@ action, `identity.server.ts` and the reveal dialog are removed.
   rows, or a one-time transfer where a signed-in student binds their handle to
   a device key and the link is then deleted. Migration 0003 does neither: it
   leaves V Auth rows valid, because moderators are V Auth rows too.
-- Deferred, not built: abuse brakes that do not identify anyone. Cloudflare
-  Turnstile on `POST /api/device/session`, so a new handle costs a human a few
-  seconds rather than costing a script nothing, and a Workers rate-limit
-  binding on the same route keyed by connecting IP, counted at the edge and
-  never written to Neon or the Durable Object. Until then, minting handles is
-  free, and that has to be fixed before an open launch.
+- Abuse brakes that do not identify anyone. Built (2026-10-06): a Workers
+  rate-limit binding on `POST /api/device/session`, keyed by connecting IP,
+  counted at the edge and never written to Neon or the Durable Object. It
+  charges only a key with no member row, 20 a minute per address. Deferred,
+  not built: Cloudflare Turnstile on the same route, so a new handle costs a
+  human a few seconds rather than costing a script nothing. Until then, a
+  script can still mint 20 handles a minute from each address it controls,
+  and that has to be fixed before an open launch.
 - The app must not store IP addresses, and Workers observability must not
   record `cf-connecting-ip`. Cloudflare still sees the address in transit; the
   product copy must say what the code does and no more.
