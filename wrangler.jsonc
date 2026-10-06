@@ -1,6 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "v-rooms",
+  "name": "vroom",
   "main": "./workers/app.ts",
   "compatibility_date": "2026-08-01",
   // better-auth reaches for node:crypto and AsyncLocalStorage.
