@@ -1,6 +1,6 @@
 # VRIP-09: Content policy — normalise, score by target, enforce in three tiers
 
-**Status:** Accepted
+**Status:** Accepted, amended by VRIP-14
 **Date:** 2026-08-13
 **Author:** Harshal More
 
@@ -45,14 +45,14 @@ within a short window of a profanity is the composite signal.
 
 **Three tiers:**
 
-- *Count.* Profanity with no target nearby. Nothing is blocked and nothing is shown
+- _Count._ Profanity with no target nearby. Nothing is blocked and nothing is shown
   to the sender. The room object tallies it per handle. Volume far above the room's
   norm surfaces the handle to a moderator; the word never does.
-- *Confirm.* Personal data and named individuals — a phone number, an email, a
+- _Confirm._ Personal data and named individuals — a phone number, an email, a
   social handle, an honorific plus a name. The client shows "are you sure?" and the
   message still sends if the person means it. The server records that they were
   warned, which is what makes a later suspension defensible.
-- *Block.* Profanity within range of a target, slurs, and sexual content aimed at a
+- _Block._ Profanity within range of a target, slurs, and sexual content aimed at a
   person. Refused by the room object, and filed for a moderator with the text
   attached so it arrives without anyone reporting it.
 
@@ -91,7 +91,7 @@ JavaScript in someone's browser and a hostile client simply never asks.
 - Win: repeat offenders are handled while the single moderator is asleep.
 - Cost: a wordlist is maintenance, and a Hinglish one is never finished.
 - Cost: the confirm dialog spends an interruption budget. Firing it on everyday
-  slang would train students to click through, which is why *Count* exists and why
+  slang would train students to click through, which is why _Count_ exists and why
   the confirm list stays narrow.
 - Risk: a motivated student defeats any regex within days. This buys time and
   evidence; it is not the control. The control is still a human who responds, which

@@ -1,0 +1,143 @@
+/**
+ * VRIP-09's normaliser, with VRIP-14's evasion fixes. Split out of `policy.ts`
+ * so the detector reads as scoring and this file reads as folding: everything
+ * a student can do to one word to stop it comparing equal ends up here.
+ *
+ * No runtime dependencies, like the detector, because the browser composer
+ * imports both.
+ */
+
+import { CONFUSABLES, DEVANAGARI, MASKS } from "./policy-chars";
+
+export interface Token {
+  norm: string;
+  /**
+   * A masked word's vowel-dropped form, also compared against the wordlists.
+   * `ch*tiya` is missing a letter no mapping can restore (VRIP-14).
+   */
+  skeleton?: string;
+  start: number;
+  end: number;
+}
+
+const WORD_CHAR = /[\p{L}\p{N}\p{M}]/u;
+/** Zero-width characters sit inside a word rather than splitting it. */
+const INVISIBLE = /\p{Cf}/u;
+/** Part of a word only between two word characters: `f*ck`, never `**bold**`. */
+const MASK_CHAR = /[*@$!]/;
+const MASKED = /[\d*@$!]/;
+const LETTER = /\p{L}/u;
+const COMBINING = /\p{M}/gu;
+const SINGLE_LETTER = /^[a-z]$/;
+const REPEAT = /(.)\1+/g;
+
+function mapChars(raw: string, table: Record<string, string>): string {
+  let out = "";
+  for (const ch of raw) out += table[ch] ?? ch;
+  return out;
+}
+
+/**
+ * Lowercase, fold compatibility forms (full-width and mathematical letters),
+ * strip diacritics, read look-alike letters as Latin, collapse a repeated
+ * letter to one, then fold the two digraphs that carry the Devanagari mapping:
+ * `च` transliterates to `ch`, and `म क च` only reduces to `mkc` if `ch` folds to
+ * `c`. The wordlists fold the same way, so both sides of every comparison meet
+ * in the middle.
+ */
+export function normaliseWord(raw: string): string {
+  const folded = mapChars(raw, DEVANAGARI)
+    .normalize("NFKD")
+    .replace(COMBINING, "")
+    .toLowerCase();
+  return mapChars(folded, CONFUSABLES)
+    .replace(/[^a-z0-9]/g, "")
+    .replace(REPEAT, "$1")
+    .replace(/ch/g, "c")
+    .replace(/jh/g, "j");
+}
+
+/**
+ * Dropping the vowels is the other one-keystroke evasion: `fck` for `fuck`,
+ * `bhnchd` for `bhenchod`. A leading vowel is kept.
+ */
+export function elide(word: string): string {
+  return word.slice(0, 1) + word.slice(1).replace(/[aeiou]/g, "");
+}
+
+function isCore(ch: string | undefined): boolean {
+  return ch !== undefined && (WORD_CHAR.test(ch) || INVISIBLE.test(ch));
+}
+
+function inWord(text: string, i: number, ch: string): boolean {
+  if (isCore(ch)) return true;
+  if (!MASK_CHAR.test(ch)) return false;
+  const near = (c: string | undefined) =>
+    isCore(c) || (c !== undefined && MASK_CHAR.test(c));
+  return near(text[i - 1]) && near(text[i + 1]);
+}
+
+function wordToken(raw: string, start: number, end: number): Token | null {
+  const masked = LETTER.test(raw) && MASKED.test(raw);
+  const norm = normaliseWord(masked ? mapChars(raw, MASKS) : raw);
+  if (!norm) return null;
+  return masked
+    ? { norm, skeleton: elide(norm), start, end }
+    : { norm, start, end };
+}
+
+/**
+ * Walks code points, not UTF-16 units: a mathematical letter such as `𝐟` is
+ * two units, and testing either half alone reads as a separator.
+ */
+export function tokenize(text: string): Token[] {
+  const raw: Token[] = [];
+  let start = -1;
+  for (let i = 0; i <= text.length;) {
+    const ch =
+      i < text.length ? String.fromCodePoint(text.codePointAt(i)!) : "";
+    const isWord = ch !== "" && inWord(text, i, ch);
+    if (isWord && start < 0) start = i;
+    if (!isWord && start >= 0) {
+      const token = wordToken(text.slice(start, i), start, i);
+      if (token) raw.push(token);
+      start = -1;
+    }
+    i += ch.length || 1;
+  }
+  return mergeInitials(raw);
+}
+
+/**
+ * `m k c`, `M.K.C` and `m-k-c` are all one word once the separators go. The
+ * joined word is normalised again, because `c h u t i y a` only becomes the
+ * wordlist's `cutiya` once the rejoined `ch` folds (VRIP-14).
+ */
+function mergeInitials(tokens: Token[]): Token[] {
+  const out: Token[] = [];
+  for (let i = 0; i < tokens.length;) {
+    let j = i;
+    while (j < tokens.length && SINGLE_LETTER.test(tokens[j].norm)) j++;
+    if (j - i >= 2) {
+      let joined = "";
+      for (let k = i; k < j; k++) joined += tokens[k].norm;
+      out.push({
+        norm: normaliseWord(joined),
+        start: tokens[i].start,
+        end: tokens[j - 1].end,
+      });
+      i = j;
+    } else {
+      out.push(tokens[i]);
+      i++;
+    }
+  }
+  return out;
+}
+
+/** The normalised form of a whole message. Exported because the tests assert on it. */
+export function normalise(text: string): string {
+  return tokenize(text)
+    .map((t) => t.norm)
+    .join(" ");
+}

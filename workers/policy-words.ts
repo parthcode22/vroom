@@ -14,7 +14,8 @@
  * one rule per word.
  */
 
-export type Category = "profanity" | "slur" | "sexual" | "accusation";
+export type Category =
+  "profanity" | "slur" | "sexual" | "accusation" | "threat" | "selfharm";
 
 export const TERMS: Record<Category, readonly string[]> = {
   /**
@@ -74,6 +75,9 @@ export const TERMS: Record<Category, readonly string[]> = {
     "aaicha ghoo",
     "bhikarchot",
     "fuck",
+    // Two masked letters leave a skeleton too short to index (VRIP-14).
+    "f**k",
+    "f**king",
     "fucking",
     "fucker",
     "motherfucker",
@@ -173,6 +177,79 @@ export const TERMS: Record<Category, readonly string[]> = {
     "paid him",
     "paid her",
   ],
+
+  /**
+   * Violence aimed at the reader (VRIP-14). Second-person phrases, never bare
+   * verbs, so "this assignment is killing me" stays legal. Blocked alone: the
+   * target is the `you` inside the phrase.
+   */
+  threat: [
+    "kill you",
+    "kill u",
+    "murder you",
+    "stab you",
+    "stab u",
+    "shoot you",
+    "beat you up",
+    "beat u up",
+    "beat you",
+    "punch you",
+    "slap you",
+    "break your legs",
+    "break your face",
+    "smash your face",
+    "rape you",
+    "rape u",
+    "acid attack",
+    "throw acid",
+    "know where you live",
+    "watch your back",
+    "you are dead",
+    "you're dead",
+    "maar dunga",
+    "maar dalunga",
+    "maar daalunga",
+    "maar denge",
+    "maar dalenge",
+    "jaan se maar",
+    "goli maar",
+    "chaku maar",
+    "thok dunga",
+    "haddi tod dunga",
+    "taange tod dunga",
+    "muh tod dunga",
+    "marun takin",
+    "मार दूंगा",
+    "जान से मार",
+    "गोली मार",
+  ],
+
+  /**
+   * Telling someone to harm themselves (VRIP-14). A student writing about
+   * themselves ("I want to kill myself") matches nothing here, and must not.
+   */
+  selfharm: [
+    "kill yourself",
+    "kill urself",
+    "kill your self",
+    "kill ur self",
+    "kys",
+    "go die",
+    "go and die",
+    "just die",
+    "neck yourself",
+    "hang yourself",
+    "mar ja",
+    "marja",
+    "ja ke mar",
+    "jaake mar",
+    "suicide karle",
+    "suicide kar le",
+    "suicide kar lo",
+    "phansi laga le",
+    "fansi laga le",
+    "मर जा",
+  ],
 };
 
 /**
@@ -201,6 +278,18 @@ export const GUARDS: Record<string, readonly string[]> = {
   // rather than a guard on it.
   bc: ["email", "mail", "inbox", "forward", "forwarded", "recipient"],
   sexy: ["looks", "looked", "design", "ui", "font", "car", "bike"],
+  // Bunking a lecture, not hitting anyone (VRIP-14).
+  "maar dunga": [
+    "lecture",
+    "class",
+    "bunk",
+    "chakkar",
+    "round",
+    "gol",
+    "sutta",
+  ],
+  // Exhaustion said about yourself: "garmi se mar ja raha hu".
+  "mar ja": ["raha", "rahi", "rahe", "gaya", "gayi", "hu", "hoon", "garmi"],
 };
 
 /**
@@ -269,90 +358,3 @@ export const DIVISIONS: readonly string[] = [
   "MBA",
   "MCA",
 ];
-
-/**
- * Deterministic, not faithful. Inherent vowels are dropped, so `म क च` folds to
- * `mkc` — which is the abbreviation students actually type — while a whole word
- * folds to a stable string that its Devanagari entry in TERMS folds to as well.
- */
-export const DEVANAGARI: Record<string, string> = {
-  अ: "a",
-  आ: "a",
-  इ: "i",
-  ई: "i",
-  उ: "u",
-  ऊ: "u",
-  ऋ: "ri",
-  ए: "e",
-  ऐ: "ai",
-  ओ: "o",
-  औ: "au",
-  "ा": "a",
-  "ि": "i",
-  "ी": "i",
-  "ु": "u",
-  "ू": "u",
-  "ृ": "ri",
-  "ॅ": "e",
-  "े": "e",
-  "ै": "ai",
-  "ॉ": "o",
-  "ो": "o",
-  "ौ": "au",
-  "ं": "n",
-  "ँ": "n",
-  "ः": "h",
-  "्": "",
-  "़": "",
-  क: "k",
-  ख: "kh",
-  ग: "g",
-  घ: "gh",
-  ङ: "n",
-  च: "ch",
-  छ: "ch",
-  ज: "j",
-  झ: "jh",
-  ञ: "n",
-  ट: "t",
-  ठ: "th",
-  ड: "d",
-  ढ: "dh",
-  ण: "n",
-  त: "t",
-  थ: "th",
-  द: "d",
-  ध: "dh",
-  न: "n",
-  प: "p",
-  फ: "ph",
-  ब: "b",
-  भ: "bh",
-  म: "m",
-  य: "y",
-  र: "r",
-  ल: "l",
-  व: "v",
-  श: "sh",
-  ष: "sh",
-  स: "s",
-  ह: "h",
-  ळ: "l",
-  क़: "k",
-  ख़: "kh",
-  ग़: "g",
-  ज़: "z",
-  ड़: "r",
-  ढ़: "rh",
-  फ़: "f",
-  "०": "0",
-  "१": "1",
-  "२": "2",
-  "३": "3",
-  "४": "4",
-  "५": "5",
-  "६": "6",
-  "७": "7",
-  "८": "8",
-  "९": "9",
-};
