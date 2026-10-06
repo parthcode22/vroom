@@ -4,6 +4,7 @@ import { redirect } from "react-router";
 import type { Route } from "./+types/home";
 import { getSessionUser } from "~/lib/auth.server";
 import { signInWithVAuth } from "~/lib/auth-client";
+import { isVAuthSignInOpen } from "~/lib/sign-in.server";
 
 export function meta() {
   return [
@@ -19,10 +20,11 @@ export function meta() {
 export async function loader({ request }: Route.LoaderArgs) {
   const user = await getSessionUser(request);
   if (user) throw redirect("/room");
-  return {};
+  return { signInOpen: isVAuthSignInOpen() };
 }
 
-export default function Home() {
+export default function Home({ loaderData }: Route.ComponentProps) {
+  const { signInOpen } = loaderData;
   return (
     <main className="mx-auto flex min-h-dvh max-w-[560px] flex-col justify-center px-5 py-16">
       <div className="wordmark mb-10">
@@ -53,12 +55,17 @@ export default function Home() {
         </p>
       </div>
 
-      <SignInButton />
-
-      <p className="text-ink-3 mt-4 text-[12.5px] leading-relaxed">
-        You need a V Auth account, the same one you use for VERP. V Rooms holds
-        no password of its own.
-      </p>
+      {signInOpen ? (
+        <>
+          <SignInButton />
+          <p className="text-ink-3 mt-4 text-[12.5px] leading-relaxed">
+            You need a V Auth account, the same one you use for VERP. V Rooms
+            holds no password of its own.
+          </p>
+        </>
+      ) : (
+        <SignInPaused />
+      )}
 
       <p className="text-ink-3 mt-10 text-[12.5px]">
         Built by{" "}
@@ -71,6 +78,23 @@ export default function Home() {
         . The rooms that do not exist yet are open issues.
       </p>
     </main>
+  );
+}
+
+function SignInPaused() {
+  return (
+    <div
+      role="status"
+      className="border-line-2 bg-panel rounded-[10px] border p-4"
+    >
+      <h2 className="mb-2 text-[14px] font-semibold">
+        Sign-in is paused for now
+      </h2>
+      <p className="text-ink-2 text-[13.5px] leading-relaxed">
+        New sign-ins through V Auth are closed for a short while. Students who
+        are already signed in are not affected. Check back soon.
+      </p>
+    </div>
   );
 }
 
