@@ -29,7 +29,7 @@ import { readRooms } from "~/lib/room.server";
  * student is presentation; `requireModerator` at the top of the loader and
  * again at the top of the action is the access control.
  *
- * The action is the endpoint that closes the room and reveals identities, so it
+ * The action is the endpoint that closes the room and suspends handles, so it
  * carries an explicit same-origin check rather than resting on the session
  * cookie's inherited sameSite default.
  */
@@ -84,7 +84,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       readRooms(),
     ]);
 
-  // No email leaves this function. `reveal` is a POST and nothing else (VRIP-08).
+  // No email leaves this function; students have none to leak (VRIP-13).
   return {
     reports,
     accounts,

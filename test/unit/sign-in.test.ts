@@ -45,16 +45,19 @@ describe("isSignInRequest", () => {
 });
 
 describe("api/auth/* while sign-in is paused", () => {
-  const original = process.env.VAUTH_SIGN_IN;
+  // `wrangler types` narrows the var to the literal in wrangler.jsonc, which a
+  // test that flips it cannot satisfy.
+  const env = process.env as Record<string, string | undefined>;
+  const original = env.VAUTH_SIGN_IN;
 
   beforeEach(() => {
     handler.mockClear();
-    process.env.VAUTH_SIGN_IN = "off";
+    env.VAUTH_SIGN_IN = "off";
   });
 
   afterEach(() => {
-    if (original === undefined) delete process.env.VAUTH_SIGN_IN;
-    else process.env.VAUTH_SIGN_IN = original;
+    if (original === undefined) delete env.VAUTH_SIGN_IN;
+    else env.VAUTH_SIGN_IN = original;
   });
 
   it("refuses a new sign-in without reaching better-auth", async () => {
@@ -85,7 +88,7 @@ describe("api/auth/* while sign-in is paused", () => {
   });
 
   it("passes sign-in through once reopened", async () => {
-    process.env.VAUTH_SIGN_IN = "on";
+    env.VAUTH_SIGN_IN = "on";
     const request = new Request(url("/api/auth/sign-in/oauth2"), {
       method: "POST",
     });

@@ -14,6 +14,8 @@ declare namespace Cloudflare {
     BETTER_AUTH_URL: string;
     BETTER_AUTH_SECRET: string;
     APP_JWT_SECRET: string;
+    /** Signs device-key challenges and student session cookies (VRIP-13). */
+    DEVICE_SESSION_SECRET: string;
     VAUTH_CLIENT_ID: string;
     VAUTH_CLIENT_SECRET: string;
     MOD_SCRIPT_TOKEN: string;
@@ -29,6 +31,7 @@ declare namespace NodeJS {
     BETTER_AUTH_URL: string;
     BETTER_AUTH_SECRET: string;
     APP_JWT_SECRET: string;
+    DEVICE_SESSION_SECRET: string;
     VAUTH_CLIENT_ID: string;
     VAUTH_CLIENT_SECRET: string;
     MOD_SCRIPT_TOKEN: string;

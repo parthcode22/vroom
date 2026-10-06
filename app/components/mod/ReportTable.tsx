@@ -1,7 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import { Link, useFetcher } from "react-router";
 
-import { RevealDialog, type RevealTarget } from "./RevealDialog";
 import {
   CBX,
   CBX_HIT,
@@ -27,8 +26,8 @@ import type { ModActionData } from "~/routes/mod";
  * queue is a safety surface, and a row it silently drops is a report nobody
  * acts on.
  *
- * The Identity column stays unresolved until a reveal returns an address, and
- * that address lives in this component's state and nowhere else (VRIP-08).
+ * There is no identity column. A handle is a device key with no person behind
+ * it, so the remedies are the message and the handle (VRIP-13).
  */
 
 export interface ReportRow {
@@ -42,7 +41,7 @@ export interface ReportRow {
   createdAt: string | Date;
 }
 
-type Column = "author" | "identity";
+type Column = "author";
 
 export interface ReportTableProps {
   reports: ReportRow[];
@@ -62,9 +61,6 @@ export function ReportTable({
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [sortDir, setSortDir] = useState<0 | 1 | -1>(0);
   const [hidden, setHidden] = useState<Set<Column>>(new Set());
-  const [emails, setEmails] = useState<Record<string, string>>({});
-  const [target, setTarget] = useState<RevealTarget | null>(null);
-  const revealFor = useRef<string | null>(null);
 
   const rows = useMemo(() => {
     const query = filter.trim().toLowerCase();
@@ -79,17 +75,6 @@ export function ReportTable({
       (a, b) => (a.handle ?? "").localeCompare(b.handle ?? "") * sortDir,
     );
   }, [reports, filter, sortDir]);
-
-  // The address is returned by the action for exactly one report. Which one is
-  // not in the response, so the submitting row is remembered here.
-  useEffect(() => {
-    const result = fetcher.data?.data;
-    const email = result?.intent === "reveal" ? result.email : undefined;
-    const id = revealFor.current;
-    if (!email || !id) return;
-    revealFor.current = null;
-    setEmails((current) => ({ ...current, [id]: email }));
-  }, [fetcher.data]);
 
   const busyId =
     fetcher.state !== "idle"
@@ -127,24 +112,11 @@ export function ReportTable({
 
   function menuFor(report: ReportRow): MenuItem[] {
     const done = report.status !== "open";
-    const revealed = emails[report.id] !== undefined;
     return [
       {
         kind: "label",
         text: `Report on message ${report.messageId.slice(0, 8)}`,
       },
-      {
-        text: "Reveal identity",
-        disabled: done || revealed,
-        onSelect: () =>
-          setTarget({
-            id: report.id,
-            handle: report.handle,
-            snapshot: report.snapshot,
-            messageId: report.messageId,
-          }),
-      },
-      { kind: "sep" },
       {
         text: "Delete message",
         danger: true,
@@ -172,8 +144,8 @@ export function ReportTable({
       <div className="sec-head">
         <h2>Reports</h2>
         <p>
-          A reveal is only reachable from a report, so every identity lookup is
-          bound to a message.
+          Handles are anonymous to VOSS too. Delete the message, suspend the
+          handle, or dismiss the report.
         </p>
       </div>
 
@@ -196,12 +168,6 @@ export function ReportTable({
                 tick: !hidden.has("author"),
                 keepOpen: true,
                 onSelect: () => toggleColumn("author"),
-              },
-              {
-                text: "Identity",
-                tick: !hidden.has("identity"),
-                keepOpen: true,
-                onSelect: () => toggleColumn("identity"),
               },
             ]}
           >
@@ -266,7 +232,6 @@ export function ReportTable({
                     </button>
                   </th>
                 )}
-                {!hidden.has("identity") && <th>Identity</th>}
                 <th className={COL_A}>
                   <span className="sr">Actions</span>
                 </th>
@@ -276,7 +241,6 @@ export function ReportTable({
               {rows.map((report) => {
                 const done = report.status !== "open";
                 const busy = busyId === report.id;
-                const email = emails[report.id];
                 return (
                   <tr
                     key={report.id}
@@ -311,17 +275,6 @@ export function ReportTable({
                         }}
                       >
                         {report.handle ?? "no handle"}
-                      </td>
-                    )}
-                    {!hidden.has("identity") && (
-                      <td>
-                        {email ? (
-                          <span className="cell-mail">{email}</span>
-                        ) : (
-                          <span className="cell-none">
-                            {done ? "not revealed" : "Not revealed"}
-                          </span>
-                        )}
                       </td>
                     )}
                     <td className={COL_A}>
@@ -383,16 +336,6 @@ export function ReportTable({
           )}
         </div>
       </div>
-
-      <RevealDialog
-        report={target}
-        onCancel={() => setTarget(null)}
-        onConfirm={(report) => {
-          revealFor.current = report.id;
-          act("reveal", report.id);
-          setTarget(null);
-        }}
-      />
     </section>
   );
 }

@@ -10,22 +10,24 @@ import {
 import { user } from "./auth";
 
 /**
- * One row per V Auth account that has entered V Rooms.
+ * One row per student device key, or per moderator's V Auth account (VRIP-13).
+ *
+ * A student row carries `key_hash`, the sha256 of the browser's public key, and
+ * nothing that names a person. A moderator row carries `user_id`. Migration
+ * 0003 adds the CHECK that every row has exactly one of the two.
  *
  * There is deliberately NO email column and NO V Auth subject column. Both
- * already exist exactly once in better-auth's tables, and a second copy of the
- * most sensitive data in the system is the thing VRIP-04 exists to avoid. The
- * mapping VRIP-04 describes IS the foreign key `user_id`, and resolving it to a
- * human requires joining `user` — which only identity.server.ts does.
+ * already exist exactly once in better-auth's tables, for moderators only.
  */
 export const members = pgTable(
   "members",
   {
     id: uuid("id").primaryKey().defaultRandom(),
     userId: text("user_id")
-      .notNull()
       .unique()
       .references(() => user.id, { onDelete: "cascade" }),
+    // Hex sha256 of the SPKI public key. The key itself is never stored.
+    keyHash: text("key_hash").unique(),
     // NULL until claimed. [a-z-] only, enforced by pseudonym.ts on the write path.
     pseudonym: text("pseudonym").unique(),
     // Granted out of band. Never self-service, never settable from a route.

@@ -4,7 +4,7 @@ Local rules for this repo. These override generic guidance.
 
 ## Project
 
-V Rooms — a pseudonymous, real-time campus conversation for verified VIT students.
+V Rooms — an anonymous, real-time campus conversation for VIT students (VRIP-13).
 Built by VOSS Labs. Read `.preset/PRODUCT.md` before proposing any feature; the
 out-of-scope list there is deliberate and is not a backlog to quietly work through.
 
@@ -35,7 +35,8 @@ Decided in VRIP-03. Do not substitute parts of it without a superseding XIP.
 - Realtime: one Durable Object per room on the WebSocket Hibernation API
 - Message history: Durable Object SQLite storage
 - Users, reports, moderation audit: Neon Postgres via `@neondatabase/serverless`
-- Auth: V Auth OIDC, exchanged for a short-lived app JWT
+- Auth: students sign in with a browser-held device key; moderators with V Auth
+ OIDC. Either is exchanged for a short-lived app JWT (VRIP-13)
 - No Redis. See VRIP-03 for why.
 
 ## Hard constraints
@@ -48,23 +49,31 @@ Decided in VRIP-03. Do not substitute parts of it without a superseding XIP.
   seconds and is the single most likely source of a confusing bug here.
 - Use Neon's serverless HTTP driver, not a TCP `pg` client. Workers cannot hold TCP
   Postgres connections.
-- Validate the V Auth JWT on the WebSocket upgrade request, before the upgrade is
-  accepted. Auth checks come before any business logic.
-- Never log, echo, or commit the V Auth account to pseudonym mapping outside the
-  users table. It is the most sensitive data in the system.
+- Validate the app JWT on the WebSocket upgrade request, before the upgrade is
+ accepted. Auth checks come before any business logic.
+- A student is a device key and nothing else. Store only the sha256 of the
+ public key: never an email, a name, an IP address, or anything that links a
+ handle to a person. The `members_one_identity` CHECK rejects a row that has
+ both a key hash and a V Auth account (VRIP-13).
+- Moderators are V Auth accounts. Never log, echo, or commit their email outside
+ better-auth's tables.
 - Report, block, suspend, and the kill switch ship in v1. They are not features to
   defer to a later phase.
 - The kill switch is Durable Object state, never an environment variable. An env var
   needs a redeploy and is useless as an emergency control (VRIP-05).
 - The app token goes in the WebSocket subprotocol, never the query string. A query
   string writes a bearer credential into every access log it passes (VRIP-07).
-- Revealing an identity must be bound to a report. The database enforces it: a
-  moderation_audit row with action 'reveal' and a null report_id violates a CHECK
-  constraint (VRIP-04, VRIP-05).
-- Every moderator action re-checks the role on the server. Hiding the navigation
+- There is no identity reveal. Do not add one: there is nothing behind a handle
+ to reveal, and building a way to find out would undo VRIP-13. The old
+ `reveal_must_be_bound` CHECK stays so historical audit rows remain valid.
+- Every moderator action re-checks the role on the server, and refuses any
+ member without a V Auth account. Hiding the navigation
   entry is presentation, not access control.
 - Rate limiting is keyed per pseudonym, not per socket. Two tabs must not double
-  anyone's budget.
+ anyone's budget.
+- Never run `drizzle-kit push` against a database that already has data. It
+ drops the `_migrations` ledger and every CHECK the SQL migrations add. On an
+ existing database run `npm run db:migrate` only.
 
 ## Conventions
 

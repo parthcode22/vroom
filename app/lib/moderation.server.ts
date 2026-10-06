@@ -5,7 +5,6 @@ import {
 } from "~/db/queries/members";
 import { findReport, setReportStatus } from "~/db/queries/reports";
 import { writeAudit } from "~/db/queries/audit";
-import { resolveIdentity } from "~/lib/identity.server";
 import { getRoom, RoomUnreachable, type RoomStub } from "~/lib/room.server";
 import { ROOM_IDS, isRoomId, type RoomId } from "~/lib/rooms";
 import { ModerationError, assertModerator } from "~/lib/require-role.server";
@@ -20,8 +19,8 @@ import { ModerationError, assertModerator } from "~/lib/require-role.server";
  * that never happened is a lie in the record, and the audit trail is worth more
  * when its rows are true than when they are complete.
  *
- * The single exception is `reveal`, where the audit row is the precondition and
- * the read happens only if that write succeeded.
+ * There is no `reveal`. Students are device keys with nothing behind them, so
+ * there is no identity to resolve (VRIP-13).
  */
 
 export interface ModActor {
@@ -30,7 +29,6 @@ export interface ModActor {
 }
 
 export type ModIntent =
-  | "reveal"
   | "delete_message"
   | "suspend"
   | "restore"
@@ -38,7 +36,6 @@ export type ModIntent =
   | "set_room_state";
 
 export const MOD_INTENTS: readonly ModIntent[] = [
-  "reveal",
   "delete_message",
   "suspend",
   "restore",
@@ -61,9 +58,8 @@ export interface ModFields {
 }
 
 export type ModResult =
-  | { intent: "reveal"; email: string; name: string }
   | { intent: "set_room_state"; killed: boolean; at: number }
-  | { intent: Exclude<ModIntent, "reveal" | "set_room_state">; ok: true };
+  | { intent: Exclude<ModIntent, "set_room_state">; ok: true };
 
 /**
  * Any failure to reach or command the object is `room_unreachable`. That is the
@@ -143,8 +139,6 @@ export async function performModeration(
   assertModerator(actor.member);
 
   switch (intent) {
-    case "reveal":
-      return reveal(actor, fields);
     case "delete_message":
       return deleteMessage(actor, fields);
     case "suspend":
@@ -156,19 +150,6 @@ export async function performModeration(
     case "set_room_state":
       return setRoomState(actor, fields);
   }
-}
-
-/** Audit first. The row is the precondition, and the CHECK enforces the binding. */
-async function reveal(actor: ModActor, fields: ModFields): Promise<ModResult> {
-  const report = await requireReport(fields.reportId);
-  const resolved = await resolveIdentity({
-    memberId: report.reportedMemberId,
-    actorMemberId: actor.member.id,
-    actorKind: actor.kind,
-    reportId: report.id,
-    messageId: report.messageId,
-  });
-  return { intent: "reveal", email: resolved.email, name: resolved.name };
 }
 
 async function deleteMessage(

@@ -7,7 +7,6 @@ const setSuspended = vi.fn();
 const findReport = vi.fn();
 const setReportStatus = vi.fn();
 const writeAudit = vi.fn();
-const resolveIdentity = vi.fn();
 const getRoom = vi.fn();
 
 vi.mock("~/db/queries/members", () => ({
@@ -21,9 +20,6 @@ vi.mock("~/db/queries/reports", () => ({
 }));
 vi.mock("~/db/queries/audit", () => ({
   writeAudit: (...a: unknown[]) => writeAudit(...a),
-}));
-vi.mock("~/lib/identity.server", () => ({
-  resolveIdentity: (...a: unknown[]) => resolveIdentity(...a),
 }));
 vi.mock("~/lib/room.server", () => ({
   getRoom: (id: string) => getRoom(id),
@@ -104,11 +100,6 @@ beforeEach(() => {
     order.push("audit");
     return { id: "a1" };
   });
-  resolveIdentity.mockResolvedValue({
-    email: "x@vit.edu.in",
-    name: "X",
-    auditId: "a1",
-  });
 });
 
 const FIELDS = { reportId: "r1", memberId: "m2", killed: true };
@@ -135,7 +126,7 @@ describe("role enforcement", () => {
   it("refuses every action for a suspended moderator", async () => {
     // Suspension is the product's only remedy against a moderator. A guard that
     // reads deletedAt but not suspendedAt leaves the suspended account the kill
-    // switch, restore on itself, and reveal — which returns an email address.
+    // switch and restore on itself.
     const suspended = member({ suspendedAt: new Date() });
     for (const intent of MOD_INTENTS) {
       await expect(
@@ -147,7 +138,22 @@ describe("role enforcement", () => {
       ).rejects.toMatchObject({ code: "not_moderator" });
     }
     expect(order).toEqual([]);
-    expect(resolveIdentity).not.toHaveBeenCalled();
+  });
+
+  it("refuses a device-key member even if it was flagged as a moderator", async () => {
+    // Moderation needs an accountable person, so a handle with no V Auth
+    // account behind it never acts, whatever its flag says (VRIP-13).
+    const anonymous = member({ userId: null });
+    for (const intent of MOD_INTENTS) {
+      await expect(
+        performModeration(
+          { member: anonymous, kind: "script" },
+          intent,
+          FIELDS,
+        ),
+      ).rejects.toMatchObject({ code: "not_moderator" });
+    }
+    expect(order).toEqual([]);
   });
 
   it("refuses a suspended moderator at the script door too", async () => {
@@ -170,18 +176,18 @@ describe("role enforcement", () => {
     ).rejects.toBeInstanceOf(ModerationError);
   });
 
-  it("recognises exactly the six documented intents", () => {
+  it("recognises exactly the five documented intents, and reveal is not one", () => {
     expect([...MOD_INTENTS].sort()).toEqual(
       [
         "delete_message",
         "dismiss_report",
         "restore",
-        "reveal",
         "set_room_state",
         "suspend",
       ].sort(),
     );
     expect(isModIntent("suspend")).toBe(true);
+    expect(isModIntent("reveal")).toBe(false);
     expect(isModIntent("drop_database")).toBe(false);
   });
 });
@@ -299,47 +305,6 @@ describe("ordering: enforcement first, record second", () => {
     ).rejects.toMatchObject({ code: "room_unreachable" });
     expect(setSuspended).not.toHaveBeenCalled();
     expect(writeAudit).not.toHaveBeenCalled();
-  });
-});
-
-describe("reveal", () => {
-  it("is the exception: it goes through the audited resolver, bound to a report", async () => {
-    const result = await performModeration(
-      { member: member(), kind: "console" },
-      "reveal",
-      FIELDS,
-    );
-    expect(resolveIdentity).toHaveBeenCalledWith(
-      expect.objectContaining({
-        reportId: "r1",
-        memberId: "m2",
-        actorKind: "console",
-      }),
-    );
-    expect(result).toEqual({
-      intent: "reveal",
-      email: "x@vit.edu.in",
-      name: "X",
-    });
-  });
-
-  it("cannot be performed without a report", async () => {
-    await expect(
-      performModeration({ member: member(), kind: "console" }, "reveal", {
-        reportId: null,
-      }),
-    ).rejects.toMatchObject({ code: "report_not_found" });
-    expect(resolveIdentity).not.toHaveBeenCalled();
-  });
-
-  it("refuses an unknown report rather than falling through to a bare lookup", async () => {
-    findReport.mockResolvedValue(null);
-    await expect(
-      performModeration({ member: member(), kind: "console" }, "reveal", {
-        reportId: "nope",
-      }),
-    ).rejects.toMatchObject({ code: "report_not_found" });
-    expect(resolveIdentity).not.toHaveBeenCalled();
   });
 });
 

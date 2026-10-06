@@ -23,7 +23,7 @@ export function HandlePanel({
       <i />
       <div className="min-w-0 flex-1">
         <div className="rail-me-name">{pseudonym || "assigning a handle"}</div>
-        <div className="rail-me-sub">yours, permanently</div>
+        <div className="rail-me-sub">yours, on this device</div>
       </div>
       <button
         type="button"

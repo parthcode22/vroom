@@ -1,10 +1,10 @@
 import type { ActionFunctionArgs } from "react-router";
 
-import { getSessionUser } from "~/lib/auth.server";
-import { ensureMember, findMemberByPseudonym } from "~/db/queries/members";
+import { findMemberByPseudonym } from "~/db/queries/members";
 import { countRecentReportsBy, createReport } from "~/db/queries/reports";
 import { isSuspended } from "~/lib/membership.server";
 import { isSameOrigin } from "~/lib/origin.server";
+import { resolveActor } from "~/lib/require-role.server";
 import { tryRoom } from "~/lib/room.server";
 import { isRoomId } from "~/lib/rooms";
 
@@ -38,10 +38,10 @@ export async function action({ request }: ActionFunctionArgs) {
   if (!isSameOrigin(request))
     return fail("cross_origin", "Cross-origin requests are refused.", 403);
 
-  const user = await getSessionUser(request);
-  if (!user) return fail("unauthenticated", "Sign in first.", 401);
+  const actor = await resolveActor(request);
+  if (!actor) return fail("unauthenticated", "Sign in first.", 401);
 
-  const reporter = await ensureMember(user.id);
+  const reporter = actor.member;
   if (isSuspended(reporter))
     return fail("suspended", "This account is suspended.", 403);
 
