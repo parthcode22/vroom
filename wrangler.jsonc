@@ -13,10 +13,10 @@
     // 404 — the app renders but never hydrates. Every route exporting an action
     // lives under /api/*, /mod, or the /ws upgrade; keep this list in step with
     // app/routes.ts.
-    "run_worker_first": ["/api/*", "/ws", "/mod"]
+    "run_worker_first": ["/api/*", "/ws", "/mod"],
   },
   "durable_objects": {
-    "bindings": [{ "name": "ROOM", "class_name": "CampusRoom" }]
+    "bindings": [{ "name": "ROOM", "class_name": "CampusRoom" }],
   },
   // new_sqlite_classes is not optional: key-value backed classes do not exist
   // on the Workers free plan (VRIP-03).
@@ -30,7 +30,17 @@
   "migrations": [
     { "tag": "v1", "new_sqlite_classes": ["RoomDurableObject"] },
     { "tag": "v2", "new_sqlite_classes": ["CampusRoom"] },
-    { "tag": "v3", "deleted_classes": ["RoomDurableObject"] }
+    { "tag": "v3", "deleted_classes": ["RoomDurableObject"] },
+  ],
+  // VRIP-13's edge brake on minting handles, keyed by connecting IP and counted
+  // only for a key with no member row. Generous because campus Wi-Fi puts many
+  // students behind one address; Turnstile is the brake that stops a script.
+  "ratelimits": [
+    {
+      "name": "NEW_HANDLE_LIMITER",
+      "namespace_id": "1301",
+      "simple": { "limit": 20, "period": 60 },
+    },
   ],
   "observability": { "enabled": true },
   // The registered production callback is https://vroom.vosslabs.org/... so the
@@ -50,6 +60,6 @@
     "APP_JWT_TTL_SECONDS": "900",
     "RATE_LIMIT_MESSAGES_PER_MINUTE": "20",
     "RATE_LIMIT_HISTORY_PER_MINUTE": "30",
-    "MESSAGE_MAX_CHARS": "500"
-  }
+    "MESSAGE_MAX_CHARS": "500",
+  },
 }
