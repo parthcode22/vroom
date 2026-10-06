@@ -20,7 +20,13 @@ import {
   STAFF_ROLE,
 } from "./policy-patterns";
 import {
-  DEVANAGARI,
+  elide,
+  normalise,
+  normaliseWord,
+  tokenize,
+  type Token,
+} from "./policy-normalise";
+import {
   GUARDS,
   HONORIFICS,
   TERMS,
@@ -30,6 +36,7 @@ import {
 
 /** Re-exported so the detector stays the one import surface for policy. */
 export { redactPersonal } from "./policy-patterns";
+export { normalise, normaliseWord } from "./policy-normalise";
 
 export type Tier = "none" | "count" | "confirm" | "block";
 
@@ -52,6 +59,8 @@ const SEVERITY: Record<Category, Tier> = {
   sexual: "count",
   slur: "block",
   accusation: "none",
+  threat: "block",
+  selfharm: "block",
 };
 
 const CATEGORY_LABEL: Record<Category, string> = {
@@ -59,6 +68,8 @@ const CATEGORY_LABEL: Record<Category, string> = {
   sexual: "sexual content",
   slur: "a slur",
   accusation: "an accusation",
+  threat: "a threat",
+  selfharm: "encouraging self-harm",
 };
 
 export interface Detection {
@@ -85,91 +96,9 @@ export function isEphemeral(found: Detection): boolean {
   return found.tier === TIER.CONFIRM && found.personal.length > 0;
 }
 
-/* ---------------- normalisation ---------------- */
-
-interface Token {
-  norm: string;
-  start: number;
-  end: number;
-}
-
 interface Span {
   first: number;
   last: number;
-}
-
-const WORD_CHAR = /[\p{L}\p{N}\p{M}]/u;
-const COMBINING = /\p{M}/gu;
-const SINGLE_LETTER = /^[a-z]$/;
-const REPEAT = /(.)\1+/g;
-
-function transliterate(raw: string): string {
-  let out = "";
-  for (const ch of raw) out += DEVANAGARI[ch] ?? ch;
-  return out;
-}
-
-/**
- * Lowercase, strip diacritics, collapse a repeated letter to one, then fold the
- * two digraphs that carry the Devanagari mapping: `च` transliterates to `ch`,
- * and `म क च` only reduces to `mkc` if `ch` folds to `c`. The wordlists fold the
- * same way, so both sides of every comparison meet in the middle.
- */
-export function normaliseWord(raw: string): string {
-  return transliterate(raw)
-    .normalize("NFD")
-    .replace(COMBINING, "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]/g, "")
-    .replace(REPEAT, "$1")
-    .replace(/ch/g, "c")
-    .replace(/jh/g, "j");
-}
-
-function tokenize(text: string): Token[] {
-  const raw: Token[] = [];
-  let start = -1;
-  for (let i = 0; i <= text.length; i++) {
-    const isWord = i < text.length && WORD_CHAR.test(text[i]);
-    if (isWord && start < 0) start = i;
-    if (!isWord && start >= 0) {
-      const norm = normaliseWord(text.slice(start, i));
-      if (norm) raw.push({ norm, start, end: i });
-      start = -1;
-    }
-  }
-  return mergeInitials(raw);
-}
-
-/** `m k c`, `M.K.C` and `m-k-c` are all one word once the separators go. */
-function mergeInitials(tokens: Token[]): Token[] {
-  const out: Token[] = [];
-  for (let i = 0; i < tokens.length;) {
-    let j = i;
-    while (j < tokens.length && SINGLE_LETTER.test(tokens[j].norm)) j++;
-    if (j - i >= 2) {
-      let joined = "";
-      for (let k = i; k < j; k++) joined += tokens[k].norm;
-      const { start } = tokens[i];
-      out.push({
-        norm: joined.replace(REPEAT, "$1"),
-        start,
-        end: tokens[j - 1].end,
-      });
-      i = j;
-    } else {
-      out.push(tokens[i]);
-      i++;
-    }
-  }
-  return out;
-}
-
-/** The normalised form of a whole message. Exported because the tests assert on it. */
-export function normalise(text: string): string {
-  return tokenize(text)
-    .map((t) => t.norm)
-    .join(" ");
 }
 
 /* ---------------- indexes, built once ---------------- */
@@ -177,21 +106,18 @@ export function normalise(text: string): string {
 type Term = { parts: string[]; category: Category };
 
 /**
- * Dropping the vowels is the other one-keystroke evasion: `fck` for `fuck`,
- * `bhnchd` for `bhenchod`. Normalisation cannot restore a letter that was never
- * typed, so each term is also indexed under its elided skeleton.
+ * Normalisation cannot restore a letter that was never typed, so each term is
+ * also indexed under its elided skeleton.
  *
- * A leading vowel is kept, and a skeleton is only registered when the word is
- * at least MIN_ELIDE_SOURCE long and the skeleton at least MIN_ELIDE_LENGTH —
- * shorter ones collide with ordinary words and the false positives are not
- * worth the catch.
+ * A skeleton is only registered when the word is at least MIN_ELIDE_SOURCE long
+ * and the skeleton at least MIN_ELIDE_LENGTH — shorter ones collide with
+ * ordinary words and the false positives are not worth the catch.
  */
 const MIN_ELIDE_SOURCE = 4;
 const MIN_ELIDE_LENGTH = 3;
 
-function elide(word: string): string {
-  return word.slice(0, 1) + word.slice(1).replace(/[aeiou]/g, "");
-}
+/** Phrases are never elided: `beat you` would index as `bt y`, which is `but y` (VRIP-14). */
+const UNELIDED: ReadonlySet<Category> = new Set(["threat", "selfharm"]);
 
 const TERM_INDEX = new Map<string, Term[]>();
 function indexTerm(parts: string[], category: Category): void {
@@ -212,7 +138,9 @@ for (const [category, words] of Object.entries(TERMS)) {
         part.length < MIN_ELIDE_SOURCE ||
         skeleton[i].length >= MIN_ELIDE_LENGTH,
     );
-    if (changed && viable) indexTerm(skeleton, category as Category);
+    if (changed && viable && !UNELIDED.has(category as Category)) {
+      indexTerm(skeleton, category as Category);
+    }
   }
 }
 
@@ -254,13 +182,24 @@ interface Hit extends Span {
   category?: Category;
 }
 
+/** A masked word is also looked up by its skeleton (VRIP-14). */
+function candidates(token: Token): Term[] {
+  const direct = TERM_INDEX.get(token.norm) ?? [];
+  if (!token.skeleton || token.skeleton === token.norm) return direct;
+  return [...direct, ...(TERM_INDEX.get(token.skeleton) ?? [])];
+}
+
+function matchesPart(token: Token, part: string): boolean {
+  return token.norm === part || token.skeleton === part;
+}
+
 function findTerms(tokens: Token[]): Hit[] {
   const hits: Hit[] = [];
   for (let i = 0; i < tokens.length; i++) {
-    for (const term of TERM_INDEX.get(tokens[i].norm) ?? []) {
+    for (const term of candidates(tokens[i])) {
       const last = i + term.parts.length - 1;
       if (last >= tokens.length) continue;
-      if (term.parts.some((p, k) => tokens[i + k].norm !== p)) continue;
+      if (term.parts.some((p, k) => !matchesPart(tokens[i + k], p))) continue;
       if (isGuarded(tokens, term.parts.join(" "), i, last)) continue;
       hits.push({
         label: CATEGORY_LABEL[term.category],

@@ -1,0 +1,143 @@
+/**
+ * VRIP-09 and VRIP-14 character tables: what one character reads as before any
+ * word is compared. Data only, applied in `policy-normalise.ts`.
+ */
+
+/**
+ * Letters from other scripts that render as Latin ones (VRIP-14). Without this
+ * `сhutiya` with a Cyrillic `с` loses the letter instead of reading it.
+ */
+export const CONFUSABLES: Record<string, string> = {
+  а: "a",
+  в: "b",
+  е: "e",
+  ё: "e",
+  к: "k",
+  м: "m",
+  н: "h",
+  о: "o",
+  р: "p",
+  с: "c",
+  т: "t",
+  у: "y",
+  х: "x",
+  і: "i",
+  ј: "j",
+  ѕ: "s",
+  α: "a",
+  β: "b",
+  ε: "e",
+  ι: "i",
+  κ: "k",
+  ν: "v",
+  ο: "o",
+  ρ: "p",
+  τ: "t",
+  υ: "u",
+  χ: "x",
+};
+
+/**
+ * What a masked word means by its digits and symbols (VRIP-14). `*` maps to
+ * nothing: it hides a letter rather than standing in for one, which is why a
+ * masked word is also compared by its vowel-dropped skeleton.
+ */
+export const MASKS: Record<string, string> = {
+  "0": "o",
+  "1": "i",
+  "3": "e",
+  "4": "a",
+  "5": "s",
+  "7": "t",
+  "@": "a",
+  $: "s",
+  "!": "i",
+  "*": "",
+};
+
+/**
+ * Deterministic, not faithful. Inherent vowels are dropped, so `म क च` folds to
+ * `mkc` — which is the abbreviation students actually type — while a whole word
+ * folds to a stable string that its Devanagari entry in TERMS folds to as well.
+ */
+export const DEVANAGARI: Record<string, string> = {
+  अ: "a",
+  आ: "a",
+  इ: "i",
+  ई: "i",
+  उ: "u",
+  ऊ: "u",
+  ऋ: "ri",
+  ए: "e",
+  ऐ: "ai",
+  ओ: "o",
+  औ: "au",
+  "ा": "a",
+  "ि": "i",
+  "ी": "i",
+  "ु": "u",
+  "ू": "u",
+  "ृ": "ri",
+  "ॅ": "e",
+  "े": "e",
+  "ै": "ai",
+  "ॉ": "o",
+  "ो": "o",
+  "ौ": "au",
+  "ं": "n",
+  "ँ": "n",
+  "ः": "h",
+  "्": "",
+  "़": "",
+  क: "k",
+  ख: "kh",
+  ग: "g",
+  घ: "gh",
+  ङ: "n",
+  च: "ch",
+  छ: "ch",
+  ज: "j",
+  झ: "jh",
+  ञ: "n",
+  ट: "t",
+  ठ: "th",
+  ड: "d",
+  ढ: "dh",
+  ण: "n",
+  त: "t",
+  थ: "th",
+  द: "d",
+  ध: "dh",
+  न: "n",
+  प: "p",
+  फ: "ph",
+  ब: "b",
+  भ: "bh",
+  म: "m",
+  य: "y",
+  र: "r",
+  ल: "l",
+  व: "v",
+  श: "sh",
+  ष: "sh",
+  स: "s",
+  ह: "h",
+  ळ: "l",
+  क़: "k",
+  ख़: "kh",
+  ग़: "g",
+  ज़: "z",
+  ड़: "r",
+  ढ़: "rh",
+  फ़: "f",
+  "०": "0",
+  "१": "1",
+  "२": "2",
+  "३": "3",
+  "४": "4",
+  "५": "5",
+  "६": "6",
+  "७": "7",
+  "८": "8",
+  "९": "9",
+};
