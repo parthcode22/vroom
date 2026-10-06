@@ -16,11 +16,21 @@
     "run_worker_first": ["/api/*", "/ws", "/mod"]
   },
   "durable_objects": {
-    "bindings": [{ "name": "ROOM", "class_name": "RoomDurableObject" }]
+    "bindings": [{ "name": "ROOM", "class_name": "CampusRoom" }]
   },
   // new_sqlite_classes is not optional: key-value backed classes do not exist
   // on the Workers free plan (VRIP-03).
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["RoomDurableObject"] }],
+  //
+  // v2 and v3 are the clean start for VRIP-13: every room's history, written
+  // under handles from the old database, is deleted with the old class, and the
+  // rooms begin empty under CampusRoom. Never remove or reorder these entries;
+  // Cloudflare applies each tag once, and editing history here re-runs nothing
+  // but breaks the next deploy.
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["RoomDurableObject"] },
+    { "tag": "v2", "new_sqlite_classes": ["CampusRoom"] },
+    { "tag": "v3", "deleted_classes": ["RoomDurableObject"] }
+  ],
   "observability": { "enabled": true },
   // The registered production callback is https://vroom.vosslabs.org/... so the
   // Worker must answer on that hostname or the OAuth redirect_uri will not match.

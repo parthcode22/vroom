@@ -4,7 +4,8 @@ import { handleUpgrade } from "./upgrade";
 
 // The Durable Object class ships from the same Worker entry, so the console
 // reaches it through a binding rather than a second auth mechanism (VRIP-06).
-export { RoomDurableObject } from "./room-do";
+// Exported as CampusRoom, the class name wrangler.jsonc binds (migration v2).
+export { RoomDurableObject as CampusRoom } from "./room-do";
 
 const requestHandler = createRequestHandler(
   () => import("virtual:react-router/server-build"),
