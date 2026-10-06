@@ -1,7 +1,6 @@
 import type { ActionFunctionArgs } from "react-router";
 
-import { getSessionUser } from "~/lib/auth.server";
-import { ensureMember } from "~/db/queries/members";
+import { resolveActor } from "~/lib/require-role.server";
 import {
   ensurePseudonym,
   isSuspended,
@@ -28,9 +27,6 @@ export async function action({ request }: ActionFunctionArgs) {
   if (!isSameOrigin(request))
     return fail("cross_origin", "Cross-origin requests are refused.", 403);
 
-  const user = await getSessionUser(request);
-  if (!user) return fail("unauthenticated", "Sign in to join the room.", 401);
-
   let body: { roomId?: unknown };
   try {
     body = (await request.json()) as typeof body;
@@ -38,9 +34,14 @@ export async function action({ request }: ActionFunctionArgs) {
     return fail("bad_request", "Expected a JSON body.", 400);
   }
   const room = body.roomId;
+  // Before the actor: resolving a V Auth session creates its member row, and
+  // a request for a room that does not exist must not write anything.
   if (!isRoomId(room)) return fail("unknown_room", "No such room.", 400);
 
-  const member = await ensureMember(user.id);
+  const actor = await resolveActor(request);
+  if (!actor) return fail("unauthenticated", "Sign in to join the room.", 401);
+
+  const member = actor.member;
   if (isSuspended(member)) {
     return fail("suspended", "This account is suspended.", 403);
   }

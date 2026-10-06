@@ -20,7 +20,8 @@ const MEMBER_COLUMNS = {
 
 export type MemberRecord = {
   id: string;
-  userId: string;
+  /** Set for a moderator's V Auth account, null for a student device key. */
+  userId: string | null;
   pseudonym: string | null;
   isModerator: boolean;
   suspendedAt: Date | null;
@@ -92,6 +93,40 @@ export async function ensureMember(userId: string): Promise<MemberRecord> {
   // makes, permanently, and makes deletedAt a column nothing can set.
   const found = await findAnyMemberByUserId(userId);
   if (!found) throw new Error(`ensureMember: no row for user ${userId}`);
+  return found;
+}
+
+/** Includes tombstones, for the same reason as findAnyMemberByUserId. */
+async function findAnyMemberByKeyHash(
+  keyHash: string,
+): Promise<MemberRecord | null> {
+  const rows = await db
+    .select(MEMBER_COLUMNS)
+    .from(members)
+    .where(eq(members.keyHash, keyHash))
+    .limit(1);
+  return rows[0] ?? null;
+}
+
+/**
+ * The student counterpart of ensureMember (VRIP-13). Idempotent per key, and a
+ * tombstone is returned rather than thrown so the guards can refuse it.
+ */
+export async function ensureMemberByKey(
+  keyHash: string,
+): Promise<MemberRecord> {
+  const existing = await findAnyMemberByKeyHash(keyHash);
+  if (existing) return existing;
+
+  const rows = await db
+    .insert(members)
+    .values({ keyHash })
+    .onConflictDoNothing({ target: members.keyHash })
+    .returning(MEMBER_COLUMNS);
+  if (rows[0]) return rows[0];
+
+  const found = await findAnyMemberByKeyHash(keyHash);
+  if (!found) throw new Error("ensureMemberByKey: no row for this key");
   return found;
 }
 

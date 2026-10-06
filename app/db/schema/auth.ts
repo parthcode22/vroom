@@ -5,8 +5,9 @@ import { pgTable, text, timestamp, boolean, index } from "drizzle-orm/pg-core";
  * V Rooms is an OIDC client of V Auth, so there are no password columns in use
  * and no provider tables — `account` carries the one `voss` link per user.
  *
- * `user.email` is the most sensitive column in the system. Only
- * identity.server.ts reads it. Never add it to a select list anywhere else.
+ * Since VRIP-13 only moderators have rows here; students sign in by device key.
+ * `user.email` is still a moderator's real address. Nothing reads it, and it
+ * must never be added to a select list.
  */
 
 export const user = pgTable("user", {

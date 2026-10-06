@@ -8,6 +8,9 @@ export default [
   route("mod", "routes/mod.tsx"),
 
   route("api/auth/*", "routes/api.auth.$.ts"),
+  // Student sign-in by device key (VRIP-13).
+  route("api/device/challenge", "routes/api.device.challenge.ts"),
+  route("api/device/session", "routes/api.device.session.ts"),
   route("api/socket-token", "routes/api.socket-token.ts"),
   route("api/report", "routes/api.report.ts"),
   // The script front door (VRIP-08).

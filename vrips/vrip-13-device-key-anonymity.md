@@ -1,6 +1,6 @@
 # VRIP-13: Anonymous by device key, superseding VRIP-04
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2026-10-06
 **Author:** Harshal More
 **Supersedes:** VRIP-04
@@ -32,10 +32,11 @@ Students enter V Rooms with a device key, not V Auth.
   private key never leaves the browser and cannot be read by script.
 - The server identifies a student by `sha256(SPKI public key)` and stores
   nothing else about them: no email, no name, no V Auth subject, no IP address.
-- To mint an app token, the browser signs a short-lived server challenge. The
-  server verifies the signature against the public key, resolves the hash to a
-  member, and mints the same token VRIP-07 describes. The token, the socket and
-  the Durable Object do not change.
+- To enter, the browser signs a short-lived server challenge. The server
+  verifies the signature against the public key, resolves the hash to a member,
+  and sets a session cookie carrying only the member id. Minting the app token
+  then works as VRIP-07 describes. The token, the socket and the Durable Object
+  do not change.
 - Handles are still auto-assigned on first use and stable for that key.
 - Moderators keep signing in with V Auth. The console still needs a person who
   can be held accountable, and VRIP-05's server-side role check stays as it is.
@@ -96,23 +97,39 @@ action, `identity.server.ts` and the reveal dialog are removed.
 
 ## Implementation notes
 
-- Schema: `members.user_id` becomes nullable and a new unique
-  `members.key_hash` column is added. A student row has a key hash and no user
-  id; a moderator row has a user id. A CHECK requires exactly one of the two.
+- Schema: `members.user_id` is nullable and `members.key_hash` is a new unique
+  column holding the hex sha256 of the SPKI public key. A student row has a key
+  hash and no user id; a moderator row has a user id. Migration 0003 adds the
+  CHECK `members_one_identity`, so a row carrying both, which would be the
+  mapping this XIP removes, is rejected by the database.
+- Sign-in is two endpoints. `POST /api/device/challenge` returns a stateless
+  challenge, an HS256 JWT valid for sixty seconds. `POST /api/device/session`
+  takes the public key, the challenge and a signature over a domain-separated
+  string, verifies all three before any database work, and sets an HttpOnly,
+  SameSite=Lax cookie holding only the member id for thirty days. Both are
+  signed under `DEVICE_SESSION_SECRET`, separate from `APP_JWT_SECRET`.
+- Refined during build: VRIP-13 first proposed a signature on every token mint
+  and report. A cookie issued once from a verified proof gives the same
+  guarantee with one code path. `resolveActor` in `require-role.server.ts`
+  resolves either a moderator's better-auth session or a student's device
+  cookie, and the room loader, the token mint and the report endpoint all use
+  it.
+- `requireModerator` refuses a device session, and `assertModerator` refuses a
+  member with no user id, so a handle with nothing behind it never reaches the
+  console or the script door, even if `is_moderator` is set on it by mistake.
 - Existing student rows carry a V Auth mapping that this XIP says should not
   exist. VRIP-04 warned that reversing it does not un-retain what was collected.
-  The migration has to choose between retiring those handles and deleting the
-  linked better-auth `user` rows, or a one-time transfer where a signed-in
-  student binds their handle to a device key and the link is then deleted. This
-  is an open question for the author, not an implementation detail.
-- `POST /api/socket-token` and `POST /api/report` authenticate by challenge
-  signature instead of a better-auth session. The challenge is stateless: an
-  HMAC over a nonce and expiry under a server secret, valid for sixty seconds.
-- Abuse brakes that do not identify anyone: Cloudflare Turnstile on key
-  registration, so new handles cost a human a few seconds rather than costing a
-  script nothing; and a Workers rate-limit binding on registrations keyed by
-  connecting IP, which counts at the edge and is never written to Neon or the
-  Durable Object.
+  Before this ships to the production database, the author has to choose
+  between retiring those handles and deleting the linked better-auth `user`
+  rows, or a one-time transfer where a signed-in student binds their handle to
+  a device key and the link is then deleted. Migration 0003 does neither: it
+  leaves V Auth rows valid, because moderators are V Auth rows too.
+- Deferred, not built: abuse brakes that do not identify anyone. Cloudflare
+  Turnstile on `POST /api/device/session`, so a new handle costs a human a few
+  seconds rather than costing a script nothing, and a Workers rate-limit
+  binding on the same route keyed by connecting IP, counted at the edge and
+  never written to Neon or the Durable Object. Until then, minting handles is
+  free, and that has to be fixed before an open launch.
 - The app must not store IP addresses, and Workers observability must not
   record `cf-connecting-ip`. Cloudflare still sees the address in transit; the
   product copy must say what the code does and no more.
