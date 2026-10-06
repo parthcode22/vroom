@@ -21,15 +21,16 @@
   // new_sqlite_classes is not optional: key-value backed classes do not exist
   // on the Workers free plan (VRIP-03).
   //
-  // v2 and v3 are the clean start for VRIP-13: every room's history, written
-  // under handles from the old database, is deleted with the old class, and the
-  // rooms begin empty under CampusRoom. Never remove or reorder these entries;
+  // v2 is the clean start for VRIP-13: the rooms begin empty under CampusRoom,
+  // leaving every message written under handles from the old database behind
+  // in RoomDurableObject. Deleting that class is a separate, later deploy:
+  // Cloudflare refuses a deleted_classes migration while the live version still
+  // binds the class (error 10061). Never remove or reorder an applied entry;
   // Cloudflare applies each tag once, and editing history here re-runs nothing
   // but breaks the next deploy.
   "migrations": [
     { "tag": "v1", "new_sqlite_classes": ["RoomDurableObject"] },
-    { "tag": "v2", "new_sqlite_classes": ["CampusRoom"] },
-    { "tag": "v3", "deleted_classes": ["RoomDurableObject"] }
+    { "tag": "v2", "new_sqlite_classes": ["CampusRoom"] }
   ],
   "observability": { "enabled": true },
   // The registered production callback is https://vroom.vosslabs.org/... so the
