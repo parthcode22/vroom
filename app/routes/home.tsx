@@ -9,6 +9,7 @@ import {
   enterWithDeviceKey,
 } from "~/lib/device-key.client";
 import { resolveActor } from "~/lib/require-role.server";
+import { isVAuthSignInOpen } from "~/lib/sign-in.server";
 
 export function meta() {
   return [
@@ -23,10 +24,11 @@ export function meta() {
 export async function loader({ request }: Route.LoaderArgs) {
   const actor = await resolveActor(request);
   if (actor) throw redirect("/room");
-  return {};
+  // Only moderators use V Auth since VRIP-13, so the pause hides their link alone.
+  return { moderatorSignInOpen: isVAuthSignInOpen() };
 }
 
-export default function Home() {
+export default function Home({ loaderData }: Route.ComponentProps) {
   return (
     <main className="mx-auto flex min-h-dvh max-w-[560px] flex-col justify-center px-5 py-16">
       <div className="wordmark mb-10">
@@ -74,7 +76,7 @@ export default function Home() {
         . The rooms that do not exist yet are open issues.
       </p>
 
-      <ModeratorSignIn />
+      {loaderData.moderatorSignInOpen && <ModeratorSignIn />}
     </main>
   );
 }

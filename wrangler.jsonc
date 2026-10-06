@@ -32,6 +32,10 @@
     "BETTER_AUTH_URL": "https://vroom.vosslabs.org",
     "VROOMS_ORIGIN": "https://vroom.vosslabs.org",
     "VAUTH_DISCOVERY_URL": "https://accounts.vosslabs.org/api/auth/.well-known/openid-configuration",
+    // "off" hides the moderator V Auth link and refuses new V Auth sign-ins;
+    // existing sessions keep working. Students use device keys and are not
+    // affected (VRIP-13). Set back to "on" and redeploy to reopen.
+    "VAUTH_SIGN_IN": "off",
     "APP_JWT_TTL_SECONDS": "900",
     "RATE_LIMIT_MESSAGES_PER_MINUTE": "20",
     "RATE_LIMIT_HISTORY_PER_MINUTE": "30",
