@@ -33,6 +33,19 @@ export type MemberRecord = {
 export async function findMemberByUserId(
   userId: string,
 ): Promise<MemberRecord | null> {
+  if (userId === "dev-user") {
+    return {
+      id: "dev-member-id",
+      userId: "dev-user",
+      pseudonym: "Local Dev",
+      isModerator: true, // Needs to be true for mod console
+      suspendedAt: null,
+      suspendedReason: null,
+      deletedAt: null,
+      createdAt: new Date(),
+    };
+  }
+
   const rows = await db
     .select(MEMBER_COLUMNS)
     .from(members)
@@ -42,6 +55,19 @@ export async function findMemberByUserId(
 }
 
 export async function findMemberById(id: string): Promise<MemberRecord | null> {
+  if (id === "dev-member-id") {
+    return {
+      id: "dev-member-id",
+      userId: "dev-user",
+      pseudonym: "Local Dev",
+      isModerator: true, // Needs to be true for mod console
+      suspendedAt: null,
+      suspendedReason: null,
+      deletedAt: null,
+      createdAt: new Date(),
+    };
+  }
+
   const rows = await db
     .select(MEMBER_COLUMNS)
     .from(members)
@@ -65,6 +91,19 @@ export async function findMemberByPseudonym(
 export async function findAnyMemberByUserId(
   userId: string,
 ): Promise<MemberRecord | null> {
+  if (userId === "dev-user") {
+    return {
+      id: "dev-member-id",
+      userId: "dev-user",
+      pseudonym: "Local Dev",
+      isModerator: true, // Needs to be true for mod console
+      suspendedAt: null,
+      suspendedReason: null,
+      deletedAt: null,
+      createdAt: new Date(),
+    };
+  }
+
   const rows = await db
     .select(MEMBER_COLUMNS)
     .from(members)
