@@ -1,7 +1,7 @@
-import { cn } from "~/lib/utils";
-
-import { ROOMS, ROOM_IDS, type RoomId } from "~/lib/rooms";
 import { Link } from "react-router";
+
+import { ROOM_IDS, type RoomId } from "~/lib/rooms";
+import { cn } from "~/lib/utils";
 
 export interface HandlePanelProps {
   pseudonym: string;
@@ -23,7 +23,7 @@ export function HandlePanel({
       <i />
       <div className="min-w-0 flex-1">
         <div className="rail-me-name">{pseudonym || "assigning a handle"}</div>
-        <div className="rail-me-sub">yours, permanently</div>
+        <div className="rail-me-sub">yours, on this device</div>
       </div>
       <button
         type="button"
@@ -47,34 +47,48 @@ export function HandlePanel({
   );
 }
 
+export interface RoomLinksProps {
+  active: RoomId;
+  onNavigate?: () => void;
+}
+
+/** The room list, in the rail on wide screens and in the sheet on a phone. */
+export function RoomLinks({ active, onNavigate }: RoomLinksProps) {
+  return (
+    <>
+      {ROOM_IDS.map((id) => (
+        <Link
+          key={id}
+          to={`/room/${id}`}
+          className={cn("rail-item", id === active && "active")}
+          aria-current={id === active ? "page" : undefined}
+          onClick={onNavigate}
+        >
+          <span className="rail-hash">#</span> {id}
+        </Link>
+      ))}
+    </>
+  );
+}
+
 export interface RoomRailProps {
   pseudonym: string;
   blockCount: number;
   onClearBlocks: () => void;
-  activeRoomId: RoomId;
+  active: RoomId;
 }
 
 export function RoomRail({
   pseudonym,
   blockCount,
   onClearBlocks,
-  activeRoomId,
+  active,
 }: RoomRailProps) {
   return (
     <nav className="rail" aria-label="Rooms">
       <div className="rail-scroll">
         <div className="rail-label">Rooms</div>
-        
-        {ROOM_IDS.map((id) => (
-          <Link
-            key={id}
-            to={`/room/${id}`}
-            className={cn("rail-item", activeRoomId === id && "active")}
-            aria-current={activeRoomId === id ? "page" : undefined}
-          >
-            <span className="rail-hash">#</span> {id}
-          </Link>
-        ))}
+        <RoomLinks active={active} />
       </div>
 
       <HandlePanel

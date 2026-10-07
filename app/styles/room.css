@@ -56,6 +56,7 @@
     border: 0;
     border-radius: var(--radius-item);
     text-align: left;
+    text-decoration: none;
     cursor: pointer;
   }
   .rail-item + .rail-item {
@@ -87,33 +88,6 @@
   .rail-item.active .rail-hash {
     color: var(--color-brand);
   }
-  .rail-item.locked {
-    color: var(--color-ink-3);
-    cursor: default;
-  }
-  .rail-item.locked:hover {
-    background: var(--color-panel-2);
-    color: var(--color-ink-2);
-  }
-  .rail-issue {
-    margin-left: auto;
-    padding: 1px 6px;
-    font-family: var(--font-mono);
-    font-size: 11px;
-    color: var(--color-ink-3);
-    background: var(--color-panel-2);
-    border: 1px solid var(--color-line);
-    border-radius: var(--radius-sm);
-  }
-  .rail-note {
-    margin: 12px 10px 0;
-    padding-top: 11px;
-    font-size: 12px;
-    line-height: 1.5;
-    color: var(--color-ink-3);
-    border-top: 1px solid var(--color-line);
-  }
-
   .rail-me {
     flex: 0 0 auto;
     display: flex;
@@ -263,6 +237,24 @@
   }
   .row.flagged {
     border-left-color: var(--color-brand);
+  }
+
+  /* Never written to the store (VRIP-10). The marker is permanent rather than
+     hover-revealed like .row-time: it says the message was not saved, which is
+     the property, and the countdown is only how long it stays on screen. */
+  .row.row-temp {
+    border-left-color: var(--color-line-3);
+  }
+  .row-tag {
+    flex: 0 0 auto;
+    padding: 1px 6px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    color: var(--color-ink-3);
+    background: var(--color-panel-2);
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-sm);
   }
   .row.deleted .row-body,
   .row.blocked .row-body {

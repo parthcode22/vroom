@@ -1,7 +1,6 @@
 import type { ActionFunctionArgs } from "react-router";
 
-import { getSessionUser } from "~/lib/auth.server";
-import { ensureMember } from "~/db/queries/members";
+import { resolveActor } from "~/lib/require-role.server";
 import {
   ensurePseudonym,
   isSuspended,
@@ -10,12 +9,12 @@ import {
 import { mintAppToken } from "~/lib/app-token.server";
 import { isSameOrigin } from "~/lib/origin.server";
 import { socketUrl } from "~/lib/room-client";
-import { isValidRoomId } from "~/lib/rooms";
+import { isRoomId } from "~/lib/rooms";
 
 /**
- * Mints the app token. Same-origin and session required, pseudonym assigned on
- * first call, and a suspended member is refused so they cannot even obtain a
- * token (VRIP-07).
+ * Mints the app token for one room. Same-origin and session required,
+ * pseudonym assigned on first call, and a suspended member is refused so they
+ * cannot even obtain a token (VRIP-07).
  */
 
 function fail(code: string, message: string, status: number) {
@@ -28,10 +27,21 @@ export async function action({ request }: ActionFunctionArgs) {
   if (!isSameOrigin(request))
     return fail("cross_origin", "Cross-origin requests are refused.", 403);
 
-  const user = await getSessionUser(request);
-  if (!user) return fail("unauthenticated", "Sign in to join the room.", 401);
+  let body: { roomId?: unknown };
+  try {
+    body = (await request.json()) as typeof body;
+  } catch {
+    return fail("bad_request", "Expected a JSON body.", 400);
+  }
+  const room = body.roomId;
+  // Before the actor: resolving a V Auth session creates its member row, and
+  // a request for a room that does not exist must not write anything.
+  if (!isRoomId(room)) return fail("unknown_room", "No such room.", 400);
 
-  const member = await ensureMember(user.id);
+  const actor = await resolveActor(request);
+  if (!actor) return fail("unauthenticated", "Sign in to join the room.", 401);
+
+  const member = actor.member;
   if (isSuspended(member)) {
     return fail("suspended", "This account is suspended.", 403);
   }
@@ -54,18 +64,6 @@ export async function action({ request }: ActionFunctionArgs) {
   const pseudonym = withHandle.pseudonym;
   if (!pseudonym)
     return fail("pseudonym_unavailable", "Could not assign a handle.", 503);
-
-  let room;
-  try {
-    const body = await request.json();
-    room = body.roomId;
-  } catch {
-    room = null;
-  }
-
-  if (!room || typeof room !== "string" || !isValidRoomId(room)) {
-    return fail("invalid_room", "Invalid room ID.", 400);
-  }
 
   const expiresIn = Number(process.env.APP_JWT_TTL_SECONDS) || 900;
   const token = await mintAppToken({ pseudonym, room }, expiresIn);

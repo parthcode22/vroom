@@ -1,6 +1,6 @@
 import { handleUpgrade } from "../../workers/upgrade";
 
-export { RoomDurableObject } from "../../workers/room-do";
+export { RoomDurableObject as CampusRoom } from "../../workers/room-do";
 
 /**
  * The socket half of workers/app.ts, without the React Router request handler.

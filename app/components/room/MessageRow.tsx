@@ -1,17 +1,19 @@
 import { memo } from "react";
 
-import type { Msg } from "../../../workers/protocol";
+import type { DeletedBy, Msg } from "../../../workers/protocol";
 import { clockTime, cn, handleColour } from "~/lib/utils";
 
 export interface MessageRowProps {
   msg: Msg;
-  /** Your own handle: colours you brand orange and hides the actions. */
+  /** Your own handle: colours you brand orange and changes which actions show. */
   self: string;
   blocked: boolean;
-  deleted: boolean;
+  /** Null while the message is still in the room. */
+  deleted: DeletedBy | null;
   reported: boolean;
   onReport: (msg: Msg) => void;
   onBlock: (who: string) => void;
+  onWithdraw: (msg: Msg) => void;
 }
 
 function Row({
@@ -22,12 +24,16 @@ function Row({
   reported,
   onReport,
   onBlock,
+  onWithdraw,
 }: MessageRowProps) {
   const mine = msg.who === self;
   const actionable = !mine && !deleted && !blocked;
+  // A withdrawn message still renders, so the conversation around it reads.
+  const withdrawable = mine && !deleted;
 
   let body = msg.body;
-  if (deleted) body = "message removed by a moderator";
+  if (deleted === "author") body = "message withdrawn by its author";
+  else if (deleted) body = "message removed by a moderator";
   else if (blocked) body = "you blocked this person";
 
   return (
@@ -64,6 +70,20 @@ function Row({
             onClick={() => onBlock(msg.who)}
           >
             block
+          </button>
+        </div>
+      ) : null}
+
+      {withdrawable ? (
+        <div className="row-act">
+          <button
+            type="button"
+            className="row-btn"
+            aria-label="Withdraw this message"
+            title="Takes it out of the room for everyone. Moderators keep a record."
+            onClick={() => onWithdraw(msg)}
+          >
+            withdraw
           </button>
         </div>
       ) : null}

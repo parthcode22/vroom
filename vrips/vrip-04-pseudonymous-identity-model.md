@@ -1,6 +1,6 @@
 # VRIP-04: Pseudonymous identity, with server-side attribution retained
 
-**Status:** Accepted
+**Status:** Superseded by VRIP-13
 **Date:** 2026-08-12
 **Author:** Harshal More
 

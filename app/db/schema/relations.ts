@@ -20,7 +20,7 @@ export const accountRelations = relations(account, ({ one }) => ({
 }));
 
 export const membersRelations = relations(members, ({ one, many }) => ({
-  // The mapping. Only identity.server.ts is allowed to traverse it.
+  // Moderators only (VRIP-13). Nothing traverses it to show a person.
   user: one(user, { fields: [members.userId], references: [user.id] }),
   reportsFiled: many(reports, { relationName: "reporter" }),
   reportsAgainst: many(reports, { relationName: "reported" }),

@@ -19,7 +19,6 @@ export function requireVar(name: string): string {
   return value;
 }
 
-export const ROOM_ID = () => process.env.ROOM_ID || "campus-live";
 export const APP_JWT_TTL_SECONDS = () =>
   numberVar(process.env.APP_JWT_TTL_SECONDS, 900);
 export const MESSAGE_MAX_CHARS = () =>

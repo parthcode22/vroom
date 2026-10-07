@@ -4,7 +4,7 @@
  * better-auth's default `sameSite: "lax"` session cookie would stop a cross-site
  * form post today, but nothing in this repo sets that value, asserts it, or
  * tests it — it is a dependency default that a later config change could remove
- * silently. The console action closes the room and reveals identities, so the
+ * silently. The console action closes the room and suspends handles, so the
  * check is explicit here rather than inherited.
  */
 

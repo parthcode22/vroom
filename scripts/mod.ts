@@ -9,7 +9,6 @@
  *   npm run mod -- restore quiet-ibex
  *   npm run mod -- delete <reportId>
  *   npm run mod -- dismiss <reportId>
- *   npm run mod -- reveal <reportId>
  *
  * Reads MOD_SCRIPT_TOKEN and VROOMS_ORIGIN from the environment. It talks HTTP
  * to the deployment rather than the database, so it goes through the same
@@ -36,7 +35,6 @@ v-rooms moderation
   restore <handle>          lift a suspension
   delete <reportId>         delete the reported message
   dismiss <reportId>        close a report with no action
-  reveal <reportId>         resolve the handle behind a report
 
 Environment: MOD_SCRIPT_TOKEN, VROOMS_ORIGIN
 `.trim();
@@ -100,9 +98,6 @@ async function main(): Promise<void> {
     case "dismiss":
       if (!rest[0]) die("dismiss needs a report id.");
       return call("dismiss_report", { reportId: rest[0] });
-    case "reveal":
-      if (!rest[0]) die("reveal needs a report id.");
-      return call("reveal", { reportId: rest[0] });
     default:
       console.log(USAGE);
       process.exit(command ? 1 : 0);

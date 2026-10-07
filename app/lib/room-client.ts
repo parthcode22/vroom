@@ -2,6 +2,8 @@ import {
   CLOSE,
   PAGE_SIZE,
   PROTOCOL_ID,
+  type DeletedBy,
+  type EphemeralMsg,
   type Msg,
   type ServerFrame,
   type SystemTone,
@@ -19,13 +21,16 @@ import {
 export type ConnectionState =
   "connecting" | "open" | "reconnecting" | "closed" | "signed-out";
 
-export interface LogEntry {
-  kind: "msg" | "system";
-  key: string;
-  msg?: Msg;
-  tone?: SystemTone;
-  text?: string;
-}
+/**
+ * A union rather than one shape with optional fields, because the difference
+ * between a stored message and an ephemeral one is exactly what backfill must
+ * never confuse: only the `msg` arm carries a `seq`, so the paging cursor
+ * cannot be read off a message that was never in the store (VRIP-10).
+ */
+export type LogEntry =
+  | { kind: "msg"; key: string; msg: Msg }
+  | { kind: "temp"; key: string; msg: EphemeralMsg; expiresAt: number }
+  | { kind: "system"; key: string; tone: SystemTone; text: string };
 
 export interface RoomHandlers {
   onState(state: ConnectionState): void;
@@ -36,12 +41,24 @@ export interface RoomHandlers {
     hasMore: boolean;
   }): void;
   onMessage(msg: Msg): void;
-  onDeleted(id: string): void;
+  /** Broadcast but never stored. The client is what removes it (VRIP-10). */
+  onEphemeral(msg: EphemeralMsg): void;
+  /** Withdrawn by its author, or removed by a moderator (VRIP-11). */
+  onDeleted(id: string, by: DeletedBy): void;
   onPresence(count: number, members: string[]): void;
   onRoom(killed: boolean): void;
   onSystem(tone: SystemTone, text: string): void;
   onHistory(messages: Msg[], hasMore: boolean): void;
   onError(code: string, message: string, retryAfter?: number): void;
+}
+
+/**
+ * Who a `deleted` frame credits. Anything but an explicit "author" is read as a
+ * moderator's removal, so a frame from a server that predates VRIP-11 keeps
+ * reading the way it always did rather than crediting the author for it.
+ */
+export function deletionActor(by: unknown): DeletedBy {
+  return by === "author" ? "author" : "moderator";
 }
 
 const BLOCK_KEY = "v-rooms.blocked";
@@ -93,9 +110,21 @@ export class RoomConnection {
     this.socket = null;
   }
 
-  send(body: string): boolean {
+  /** `confirmed` says the sender saw VRIP-09's dialog and went ahead anyway. */
+  send(body: string, confirmed = false): boolean {
     if (this.socket?.readyState !== WebSocket.OPEN) return false;
-    this.socket.send(JSON.stringify({ t: "send", body }));
+    this.socket.send(JSON.stringify({ t: "send", body, confirmed }));
+    return true;
+  }
+
+  /**
+   * Withdraw one of your own messages (VRIP-11). The frame carries the id only:
+   * the room authorises against the handle on this socket, so sending a handle
+   * would be sending something the room refuses to read.
+   */
+  withdraw(id: string): boolean {
+    if (this.socket?.readyState !== WebSocket.OPEN) return false;
+    this.socket.send(JSON.stringify({ t: "withdraw", id }));
     return true;
   }
 
@@ -181,8 +210,10 @@ export class RoomConnection {
         return;
       case "message":
         return this.handlers.onMessage(frame.m);
+      case "ephemeral":
+        return this.handlers.onEphemeral(frame.m);
       case "deleted":
-        return this.handlers.onDeleted(frame.id);
+        return this.handlers.onDeleted(frame.id, deletionActor(frame.by));
       case "presence":
         return this.handlers.onPresence(frame.count, frame.members);
       case "room":

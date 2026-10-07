@@ -1,28 +1,34 @@
 import { useState } from "react";
-import { redirect } from "react-router";
+import { redirect, useNavigate } from "react-router";
 
 import type { Route } from "./+types/home";
-import { getSessionUser } from "~/lib/auth.server";
 import { signInWithVAuth } from "~/lib/auth-client";
+import {
+  DeviceKeyUnavailable,
+  SignInRefused,
+  enterWithDeviceKey,
+} from "~/lib/device-key.client";
+import { resolveActor } from "~/lib/require-role.server";
+import { isVAuthSignInOpen } from "~/lib/sign-in.server";
 
 export function meta() {
   return [
     { title: "V Rooms" },
     {
       name: "description",
-      content:
-        "One room, the whole college. Pseudonymous, for verified VIT students.",
+      content: "One room, the whole college. Anonymous, for VIT students.",
     },
   ];
 }
 
 export async function loader({ request }: Route.LoaderArgs) {
-  const user = await getSessionUser(request);
-  if (user) throw redirect("/room/campus-live");
-  return {};
+  const actor = await resolveActor(request);
+  if (actor) throw redirect("/room");
+  // Only moderators use V Auth since VRIP-13, so the pause hides their link alone.
+  return { moderatorSignInOpen: isVAuthSignInOpen() };
 }
 
-export default function Home() {
+export default function Home({ loaderData }: Route.ComponentProps) {
   return (
     <main className="mx-auto flex min-h-dvh max-w-[560px] flex-col justify-center px-5 py-16">
       <div className="wordmark mb-10">
@@ -34,31 +40,30 @@ export default function Home() {
       </h1>
 
       <p className="text-ink-2 mb-5 text-[15px] leading-relaxed">
-        Campus Live is a single conversation open to every verified VIT student.
-        No invite, no phone number, nobody you have to already know. You get one
-        handle and you keep it.
+        Campus Live is a single conversation open to every VIT student. No
+        sign-up, no email, no phone number, nobody you have to already know. You
+        get one handle and you keep it on this device.
       </p>
 
-      {/* VRIP-04 requires this to be stated plainly, in the product, before anyone signs in. */}
+      {/* VRIP-13 requires this to be stated plainly, in the product, before anyone enters. */}
       <div className="border-line-2 bg-panel mb-7 rounded-[10px] border p-4">
         <h2 className="mb-2 text-[14px] font-semibold">
-          Read this before you sign in
+          How anonymous this is
         </h2>
+        <p className="text-ink-2 mb-2 text-[13.5px] leading-relaxed">
+          Other students see a handle and nothing else, and so does VOSS. This
+          browser makes a key that never leaves it, and V Rooms stores only a
+          hash of that key. No name, no email, and no IP address are kept.
+          Cloudflare, which runs the servers, sees your IP address in transit.
+        </p>
         <p className="text-ink-2 text-[13.5px] leading-relaxed">
-          Other students see a handle and nothing else. VOSS can see who you
-          are. The mapping from your handle to your V Auth account is kept so
-          that abuse can be acted on, and every time a moderator resolves it the
-          lookup is recorded against the message that justified it. This is
-          anonymity between students, never between you and the platform.
+          Nobody can recover your handle. If you clear this site&apos;s data or
+          switch devices, you come back as someone new. Moderators can still
+          remove messages and handles that break the rules.
         </p>
       </div>
 
-      <SignInButton />
-
-      <p className="text-ink-3 mt-4 text-[12.5px] leading-relaxed">
-        You need a V Auth account, the same one you use for VERP. V Rooms holds
-        no password of its own.
-      </p>
+      <EnterButton />
 
       <p className="text-ink-3 mt-10 text-[12.5px]">
         Built by{" "}
@@ -70,22 +75,32 @@ export default function Home() {
         </a>
         . The rooms that do not exist yet are open issues.
       </p>
+
+      {loaderData.moderatorSignInOpen && <ModeratorSignIn />}
     </main>
   );
 }
 
-function SignInButton() {
+function enterError(error: unknown): string {
+  if (error instanceof DeviceKeyUnavailable)
+    return "This browser cannot keep a key, which happens in some private windows. Open V Rooms in a normal window.";
+  if (error instanceof SignInRefused) return error.message;
+  return "Could not reach V Rooms. Check your connection and try again.";
+}
+
+function EnterButton() {
+  const navigate = useNavigate();
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function start() {
+  async function enter() {
     setPending(true);
     setError(null);
     try {
-      await signInWithVAuth("/room/campus-live");
-    } catch {
-      // The redirect never happened, so the user is still here and needs telling.
-      setError("Could not reach V Auth. Check your connection and try again.");
+      await enterWithDeviceKey();
+      navigate("/room");
+    } catch (failure) {
+      setError(enterError(failure));
       setPending(false);
     }
   }
@@ -95,13 +110,44 @@ function SignInButton() {
       <button
         className="btn btn-primary h-11 w-full text-[14px]"
         type="button"
-        onClick={start}
+        onClick={enter}
         disabled={pending}
       >
-        {pending ? "Taking you to V Auth" : "Continue with V Auth"}
+        {pending ? "Entering" : "Enter anonymously"}
       </button>
       {error && (
         <p role="alert" className="text-neg mt-3 text-[13px]">
+          {error}
+        </p>
+      )}
+    </div>
+  );
+}
+
+/** Moderators keep V Auth so every moderation action has an accountable person (VRIP-13). */
+function ModeratorSignIn() {
+  const [error, setError] = useState<string | null>(null);
+
+  async function start() {
+    setError(null);
+    try {
+      await signInWithVAuth("/mod");
+    } catch {
+      setError("Could not reach V Auth. Try again.");
+    }
+  }
+
+  return (
+    <div className="mt-4">
+      <button
+        type="button"
+        className="text-ink-3 inline-flex min-h-11 items-center text-[12.5px] underline underline-offset-4"
+        onClick={start}
+      >
+        VOSS moderator? Sign in with V Auth
+      </button>
+      {error && (
+        <p role="alert" className="text-neg text-[12.5px]">
           {error}
         </p>
       )}

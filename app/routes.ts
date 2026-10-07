@@ -2,12 +2,15 @@ import { type RouteConfig, index, route } from "@react-router/dev/routes";
 
 export default [
   index("routes/home.tsx"),
-  route("room", "routes/room-redirect.tsx"),
+  route("room", "routes/room.index.tsx"),
   route("room/:roomId", "routes/room.tsx"),
   // Not rendered for a student, and every action re-checks the role server-side.
   route("mod", "routes/mod.tsx"),
 
   route("api/auth/*", "routes/api.auth.$.ts"),
+  // Student sign-in by device key (VRIP-13).
+  route("api/device/challenge", "routes/api.device.challenge.ts"),
+  route("api/device/session", "routes/api.device.session.ts"),
   route("api/socket-token", "routes/api.socket-token.ts"),
   route("api/report", "routes/api.report.ts"),
   // The script front door (VRIP-08).
