@@ -119,14 +119,17 @@ export async function ensureMember(userId: string): Promise<MemberRecord> {
 
   // TODO: Re-enable auth
   if (userId === "dev-user") {
-    await db.insert(user).values({
-      id: "dev-user",
-      name: "Local Dev",
-      email: "dev@vit.edu.in",
-      emailVerified: true,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    }).onConflictDoNothing();
+    await db
+      .insert(user)
+      .values({
+        id: "dev-user",
+        name: "Local Dev",
+        email: "dev@vit.edu.in",
+        emailVerified: true,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .onConflictDoNothing();
   }
 
   const rows = await db

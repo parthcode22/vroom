@@ -246,7 +246,7 @@ export function screen(
     pseudonym,
     now - AUTO_SUSPEND_WINDOW_MS,
   );
-  
+
   // Auto-suspension temporarily disabled pending permissions/PR
   const suspended = false; // recent >= AUTO_SUSPEND_BLOCKS;
   if (suspended) {

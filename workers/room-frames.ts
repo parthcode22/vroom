@@ -16,8 +16,6 @@ import { broadcast, closeQuietly, fail, sendTo } from "./room-broadcast";
 import { CLOSE, clampLimit } from "./protocol";
 import * as db from "./room-sql";
 
-
-
 /**
  * A history frame is a scan plus a serialisation of up to MAX_PAGE_SIZE rows,
  * so it is the more expensive of the two and the one worth budgeting: the
